@@ -37,8 +37,13 @@ mod_14_survey_server <- function(id) {
     # Retention: delete entries older than this many months
     retention_months <- 12
 
-    # Create data directory in the app's working directory
-    data_dir <- file.path(getwd(), "data")
+    # Use /srv/data/ in production (Docker), fall back to local data/ for development
+    data_dir <- if (dir.exists("/srv/data")) {
+      "/srv/data"
+    } else {
+      file.path(getwd(), "data")
+    }
+
     if (!dir.exists(data_dir)) {
       dir.create(data_dir, recursive = TRUE, showWarnings = FALSE)
     }
