@@ -44,22 +44,22 @@ mod_14_survey_server <- function(id) {
             size = "l",
             easyClose = FALSE,
             footer = tagList(
-              actionButton(ns("close_survey"), "Done", class = "btn-primary"),
-              actionButton(ns("decline_survey"), "Skip", class = "btn-secondary")
-            ),
-
-            # Privacy notice (top)
-            tags$div(
-              style = "background:#f8f9fa;border:1px solid #e3e6ea;border-radius:6px;
-                      padding:12px;margin-bottom:12px;font-size:1.00em;",
-              tags$p("Thank you for using iDEP! Please complete our quick survey (~30 seconds)."),
               tags$p(
+                style = "margin:0;padding:8px 0;font-size:0.9em;color:#666;",
                 tags$b("Note: "), "Click ",
                 tags$span("'Done'", style="color:#0066cc;font-weight:bold;"),
                 " after submitting or ",
                 tags$span("'Skip'", style="color:#666;font-weight:bold;"),
                 " to opt-out."
-              )
+              ),
+              actionButton(ns("close_survey"), "Done", class = "btn-primary"),
+              actionButton(ns("decline_survey"), "Skip", class = "btn-secondary")
+            ),
+
+            # Introduction text (top)
+            tags$p(
+              style = "margin-bottom:12px;",
+              "Thank you for using iDEP! Please complete our quick survey (~30 seconds)."
             ),
 
             # Embedded Google Form
