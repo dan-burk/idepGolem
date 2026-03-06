@@ -11,7 +11,7 @@ iDEP (Integrated Differential Expression & Pathway analysis) is a bioinformatics
 ### Development
 - **Start development server**: Run `source("dev/run_dev.R")` from R console
 - **Run app in production mode**: `idepGolem::run_app()` from R console
-- **Run tests**: `testthat::test_dir("tests/")` or `devtools::test()`
+- **Run tests**: `testthat::test_dir("tests/")` or `devtools::test()` or for one specific test only `devtools::test(filter = "deg_full_rank")`
 - **Document and reload**: `golem::document_and_reload()` (used in dev workflow)
 
 ### Package Management
