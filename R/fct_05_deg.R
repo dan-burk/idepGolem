@@ -278,7 +278,7 @@ experiment_design_txt <- function(sample_info,
         paste(select_block_factors_model, collapse = " + ")
       )
     }
-    if (!is.null(select_interactions)) {
+    if (!is.null(select_interactions) && length(select_interactions) > 0) {
       model <- paste0(
         model,
         " + ",
@@ -409,23 +409,50 @@ limma_value <- function(data_file_format,
     # DESeq2----------------------------
     if (counts_deg_method == 3) {
       return(
-        deg_deseq2(
-          raw_counts = raw_counts,
-          max_p_limma = limma_p_val,
-          min_fc_limma = limma_fc,
-          selected_comparisons = select_model_comprions,
-          sample_info = sample_info,
-          model_factors = c(select_factors_model, select_interactions),
-          block_factor = select_block_factors_model,
-          reference_levels = factor_reference_levels,
-          threshold_wald_test = threshold_wald_test,
-          independent_filtering = independent_filtering,
-          descr = descr
+        tryCatch(
+          deg_deseq2(
+            raw_counts = raw_counts,
+            max_p_limma = limma_p_val,
+            min_fc_limma = limma_fc,
+            selected_comparisons = select_model_comprions,
+            sample_info = sample_info,
+            model_factors = c(select_factors_model, select_interactions),
+            block_factor = select_block_factors_model,
+            reference_levels = factor_reference_levels,
+            threshold_wald_test = threshold_wald_test,
+            independent_filtering = independent_filtering,
+            descr = descr
+          ),
+          error = .handle_limma_error
         )
       )
       # limma-voom 2 or limma-trend 1 --------------------
     } else if (counts_deg_method < 3) {
       return(
+        tryCatch(
+          deg_limma(
+            processed_data = processed_data,
+            max_p_limma = limma_p_val,
+            min_fc_limma = limma_fc,
+            raw_counts = raw_counts,
+            counts_deg_method = counts_deg_method,
+            prior_counts = counts_log_start,
+            data_file_format = data_file_format,
+            selected_comparisons = select_model_comprions,
+            sample_info = sample_info,
+            model_factors = c(select_factors_model, select_interactions),
+            block_factor = select_block_factors_model,
+            reference_levels = factor_reference_levels
+          ),
+          error = .handle_limma_error
+        )
+      )
+    }
+
+    # normalized data -----------------------------------------------------------
+  } else if (data_file_format == 2) {
+    return(
+      tryCatch(
         deg_limma(
           processed_data = processed_data,
           max_p_limma = limma_p_val,
@@ -439,26 +466,8 @@ limma_value <- function(data_file_format,
           model_factors = c(select_factors_model, select_interactions),
           block_factor = select_block_factors_model,
           reference_levels = factor_reference_levels
-        )
-      )
-    }
-
-    # normalized data -----------------------------------------------------------
-  } else if (data_file_format == 2) {
-    return(
-      deg_limma(
-        processed_data = processed_data,
-        max_p_limma = limma_p_val,
-        min_fc_limma = limma_fc,
-        raw_counts = raw_counts,
-        counts_deg_method = counts_deg_method,
-        prior_counts = counts_log_start,
-        data_file_format = data_file_format,
-        selected_comparisons = select_model_comprions,
-        sample_info = sample_info,
-        model_factors = c(select_factors_model, select_interactions),
-        block_factor = select_block_factors_model,
-        reference_levels = factor_reference_levels
+        ),
+        error = .handle_limma_error
       )
     )
 
@@ -856,15 +865,33 @@ deg_deseq2 <- function(raw_counts,
     dds <- tryCatch(
       eval(parse(text = deseq2_object)),
       error = function(e) {
-        paste("Error in DESeq2 analysis:", e$message)
+        msg <- conditionMessage(e)
+        if (grepl("not full rank", msg)) {
+          message("[deg_deseq2] FullRankError: ", msg)
+          paste0("DEG_ERROR: FullRankError: ", msg)
+        } else {
+          message("[deg_deseq2] Unexpected error building DESeq2 object: ", msg)
+          paste0("DEG_ERROR: Unexpected: ", msg)
+        }
       }
     )
-    # Return if dds contains an error message
-    if (class(dds) == "character") {
-      return(dds)
-    }
+    if (is.character(dds)) return(dds)
 
-    dds <- DESeq2::DESeq(dds) # main function
+    # Run DESeq2 — also wraps late-stage rank failures and convergence errors
+    dds <- tryCatch(
+      DESeq2::DESeq(dds),
+      error = function(e) {
+        msg <- conditionMessage(e)
+        if (grepl("not full rank", msg)) {
+          message("[deg_deseq2] FullRankError in DESeq(): ", msg)
+          paste0("DEG_ERROR: FullRankError: ", msg)
+        } else {
+          message("[deg_deseq2] Unexpected error in DESeq(): ", msg)
+          paste0("DEG_ERROR: Unexpected: ", msg)
+        }
+      }
+    )
+    if (is.character(dds)) return(dds)
 
     expr <- paste0(
       expr,
@@ -1151,6 +1178,51 @@ deg_deseq2 <- function(raw_counts,
 }
 
 
+# Internal helper: tryCatch error handler for deg_limma calls in limma_value
+.handle_limma_error <- function(e) {
+  message("[limma_value] Uncaught deg_limma error: ", conditionMessage(e))
+  paste0("DEG_ERROR: Unexpected: ", conditionMessage(e))
+}
+
+# Internal helper: extract group-level tokens from a contrast string
+# e.g. "A_batch1-B_batch1" -> c("A_batch1", "B_batch1")
+.extract_contrast_tokens <- function(contrast_str) {
+  tokens <- trimws(unlist(strsplit(contrast_str, "[-+()\t ]+", perl = FALSE)))
+  tokens[nzchar(tokens) & grepl("^[A-Za-z_]", tokens)]
+}
+
+# Internal helper: normalize the case of group tokens in contrast strings to
+# match the exact casing used in the design matrix column names.
+# e.g. "A_batch1-B_batch2" -> "A_BATCH1-B_BATCH2" when design has "A_BATCH1".
+# Tokens with no case-insensitive match in design_levels are left unchanged.
+.normalize_contrast_case <- function(comparisons, design_levels) {
+  lookup <- stats::setNames(design_levels, tolower(design_levels))
+  vapply(comparisons, function(comp) {
+    parts <- strsplit(comp, "-")[[1]]
+    parts <- vapply(parts, function(p) {
+      key <- tolower(trimws(p))
+      if (!is.na(lookup[key])) lookup[[key]] else p
+    }, character(1), USE.NAMES = FALSE)
+    paste(parts, collapse = "-")
+  }, character(1), USE.NAMES = FALSE)
+}
+
+# Internal helper: print a readable contrast mismatch diagnostic to the terminal
+.report_contrast_mismatch <- function(comparison, design_levels) {
+  bad <- setdiff(.extract_contrast_tokens(comparison), design_levels)
+  if (length(bad) == 0) return(NULL)
+  message(
+    "[deg_limma] ContrastMismatch: '", comparison, "' -- unknown level(s): ",
+    paste(bad, collapse = ", "), " -- design: ", paste(design_levels, collapse = ", ")
+  )
+  return(paste0(
+    "DEG_ERROR: ContrastMismatch: comparison '", comparison,
+    "' references levels not in design: ", paste(bad, collapse = ", "),
+    " -- design levels: ", paste(design_levels, collapse = ", ")
+  ))
+}
+
+
 #' Differential expression using limma package
 #'
 #' Used in the limma_value function to perform DEG analysis using the
@@ -1422,6 +1494,10 @@ deg_limma <- function(processed_data,
       expr <- paste0(expr, "fit <- limma::lmFit(eset, design)\n")
     }
 
+    # Validate comparison string against design levels before calling makeContrasts
+    err <- .report_contrast_mismatch(comparisons, colnames(design))
+    if (!is.null(err)) return(err)
+
     cont_matrix <- limma::makeContrasts(
       contrasts = comparisons,
       levels = design
@@ -1550,6 +1626,12 @@ deg_limma <- function(processed_data,
 
 
       expr <- paste0(expr, print_vector(comparisons, "comparisons"))
+
+      # Validate all comparison strings against design levels before calling makeContrasts
+      for (comp in comparisons) {
+        err <- .report_contrast_mismatch(comp, colnames(design))
+        if (!is.null(err)) return(err)
+      }
 
       make_contrast <- limma::makeContrasts(contrasts = comparisons[1], levels = design)
 
@@ -1695,6 +1777,18 @@ deg_limma <- function(processed_data,
         }
         comparisons <- comparisons[-1]
 
+        # Guard: no pairwise comparisons survived the n_same_levels filter
+        if (length(comparisons) == 0) {
+          message(
+            "[deg_limma] EmptyInteractionComparisons: no valid pairwise comparisons",
+            " -- groups: ", paste(unique_groups, collapse = ", ")
+          )
+          return(paste0(
+            "DEG_ERROR: EmptyComparisons: interaction model produced no valid ",
+            "pairwise comparisons from groups: ", paste(unique_groups, collapse = ", ")
+          ))
+        }
+
         # Pairwise contrasts
         make_contrast <- limma::makeContrasts(
           contrasts = comparisons[1],
@@ -1716,29 +1810,34 @@ deg_limma <- function(processed_data,
 
         contrast_interact <- NULL
         contrast_names <- ""
-        for (kk in 1:(dim(make_contrast)[2] - 1)) {
-          for (kp in (kk + 1):dim(make_contrast)[2]) {
-            if (is.null(contrast_interact)) {
-              contrast_interact <- make_contrast[, kp] - make_contrast[, kk]
-            } else {
-              contrast_interact <- cbind(
-                contrast_interact,
-                make_contrast[, kp] - make_contrast[, kk]
+        if (ncol(make_contrast) > 1) {
+          for (kk in 1:(dim(make_contrast)[2] - 1)) {
+            for (kp in (kk + 1):dim(make_contrast)[2]) {
+              if (is.null(contrast_interact)) {
+                contrast_interact <- make_contrast[, kp] - make_contrast[, kk]
+              } else {
+                contrast_interact <- cbind(
+                  contrast_interact,
+                  make_contrast[, kp] - make_contrast[, kk]
+                )
+              }
+              contrast_names <- c(
+                contrast_names,
+                paste0(
+                  "I:",
+                  colnames(make_contrast)[kp],
+                  ".vs.",
+                  colnames(make_contrast)[kk]
+                )
               )
             }
-            contrast_names <- c(
-              contrast_names,
-              paste0(
-                "I:",
-                colnames(make_contrast)[kp],
-                ".vs.",
-                colnames(make_contrast)[kk]
-              )
-            )
           }
+          colnames(contrast_interact) <- contrast_names[-1]
+        } else {
+          message("[deg_limma] InteractionSkipped: only 1 contrast column; need >= 2 for interaction contrasts")
         }
-        colnames(contrast_interact) <- contrast_names[-1]
 
+        if (!is.null(contrast_interact)) {
         # Remove nonsense contrasts from interactions
         # only keep columns with 0, 1, or -1
         contrast_interact <- contrast_interact[, which(
@@ -1753,8 +1852,8 @@ deg_limma <- function(processed_data,
 
 
         # Remove unwanted contrasts involving different factors
-        keep <- c()
-        for (i in 1:dim(contrast_interact)[2]) {
+        keep <- character(0)
+        for (i in seq_len(ncol(contrast_interact))) {
           # I:null_IR_yes-null_mock_yes.vs.wt_IR_no-wt_IR_yes
           tem <- gsub("I:", "", colnames(contrast_interact)[i])
 
@@ -1812,8 +1911,8 @@ deg_limma <- function(processed_data,
         # Remove unwanted contrasts involving more than three levels in
         # 2-factor, or more than 3 levels in 3-factor models.
         # Not well tested  for more complex models!!!!!!!!!
-        keep <- c()
-        for (i in 1:dim(contrast_interact)[2]) {
+        keep <- character(0)
+        for (i in seq_len(ncol(contrast_interact))) {
           tem <- rownames(contrast_interact)[contrast_interact[, i] != 0]
           # split all groups in terms of factor levels
           list1 <- lapply(tem, function(x) unlist(strsplit(x, "_")))
@@ -1833,6 +1932,7 @@ deg_limma <- function(processed_data,
 
         # contrast_interact stores contrast due to interactions
         contrast_interact <- contrast_interact[, keep, drop = F]
+        } # !is.null(contrast_interact)
       } # has interaction ?
 
 
@@ -1852,6 +1952,11 @@ deg_limma <- function(processed_data,
       )
       comparisons <- as.vector(comparisons)
 
+      # Normalize contrast token case to match design matrix column names.
+      # Handles the case where sample_info column values have different
+      # capitalisation than the combined group labels in the design matrix.
+      comparisons <- .normalize_contrast_case(comparisons, colnames(design))
+
       # some comparisons does not make sense as the combination is not present
       # in design matrix
 
@@ -1866,6 +1971,24 @@ deg_limma <- function(processed_data,
         }
       }
       comparisons <- comparisons[validate_comparison]
+
+      # Check that at least one valid comparison survived filtering
+      if (length(comparisons) == 0) {
+        message(
+          "[deg_limma] EmptyComparisons: all comparisons filtered out",
+          " -- design: ", paste(colnames(design), collapse = ", ")
+        )
+        return(paste0(
+          "DEG_ERROR: EmptyComparisons: all comparisons filtered out; ",
+          "design levels: ", paste(colnames(design), collapse = ", ")
+        ))
+      }
+
+      # Validate remaining comparison strings against design levels
+      for (comp in comparisons) {
+        err <- .report_contrast_mismatch(comp, colnames(design))
+        if (!is.null(err)) return(err)
+      }
 
       expr <- paste0(expr, print_vector(comparisons, "comparisons"))
 
@@ -2000,6 +2123,20 @@ deg_limma <- function(processed_data,
           "fit <- limma::eBayes(fit, trend = limma_trend)\n"
         )
       }
+    }
+
+    # Sanity-check make_contrast before passing to contrasts.fit ----------
+    if (any(is.na(make_contrast))) {
+      na_cols <- colnames(make_contrast)[colSums(is.na(make_contrast)) > 0]
+      message(
+        "[deg_limma] NAContrast: NAs in column(s): ", paste(na_cols, collapse = ", "),
+        " -- design: ", paste(rownames(make_contrast), collapse = ", ")
+      )
+      return(paste0(
+        "DEG_ERROR: NAContrast: contrast matrix has NAs in column(s): ",
+        paste(na_cols, collapse = ", "),
+        " -- design levels: ", paste(rownames(make_contrast), collapse = ", ")
+      ))
     }
 
     # Extract contrasts ---------------------------------------------------

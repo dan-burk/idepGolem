@@ -13,7 +13,7 @@ mod_05_deg_1_ui <- function(id) {
     title = "Stats",
     sidebarLayout(
       sidebarPanel(
-        style = "height: 90vh; overflow-y: auto;", 
+        style = "height: 90vh; overflow-y: auto;",
         # Button to run DEG analysis for the specified model
         uiOutput(ns("submit_ui")),
         tags$head(tags$style(
@@ -601,11 +601,15 @@ mod_05_deg_server <- function(id, pre_process, idep_data, load_data, tab) {
       )
     })
 
-    output$list_interaction_terms <- renderUI({
-      interactions <- list_interaction_terms_ui(
+    valid_interaction_terms <- reactive({
+      list_interaction_terms_ui(
         sample_info = pre_process$sample_info(),
         select_factors_model = input$select_factors_model
       )
+    })
+
+    output$list_interaction_terms <- renderUI({
+      interactions <- valid_interaction_terms()
       req(!is.null(interactions))
       checkboxGroupInput(
         inputId = ns("select_interactions"),
@@ -657,7 +661,7 @@ mod_05_deg_server <- function(id, pre_process, idep_data, load_data, tab) {
         sample_info = pre_process$sample_info(),
         select_factors_model = input$select_factors_model,
         select_block_factors_model = input$select_block_factors_model,
-        select_interactions = input$select_interactions
+        select_interactions = intersect(input$select_interactions, valid_interaction_terms())
       )
     })
 
@@ -855,6 +859,7 @@ mod_05_deg_server <- function(id, pre_process, idep_data, load_data, tab) {
     })
 
     warning_type <- reactiveVal(NULL)
+    error_details <- reactiveVal(NULL)
     # Observe submit button ------
     observeEvent(
       input$submit_model_button,
@@ -874,7 +879,12 @@ mod_05_deg_server <- function(id, pre_process, idep_data, load_data, tab) {
             independent_filtering <- input$independent_filtering
           }
           
-          if (is.null(input$select_model_comprions) && 
+          # Guard against stale input$select_interactions: the interaction
+          # checkbox UI is hidden when < 2 factors are selected, but Shiny may
+          # not have cleared the input value before the user clicks Submit.
+          valid_interactions <- intersect(input$select_interactions, valid_interaction_terms())
+
+          if (is.null(input$select_model_comprions) &&
               !is_summary_format(pre_process$data_file_format())) {
             warning_type("NoComparison")
             deg$limma <- NULL
@@ -888,7 +898,7 @@ mod_05_deg_server <- function(id, pre_process, idep_data, load_data, tab) {
               select_model_comprions = input$select_model_comprions,
               sample_info = pre_process$sample_info(),
               select_factors_model = input$select_factors_model,
-              select_interactions = input$select_interactions,
+              select_interactions = valid_interactions,
               select_block_factors_model = input$select_block_factors_model,
               factor_reference_levels = factor_reference_levels(),
               processed_data = pre_process$data(),
@@ -899,14 +909,22 @@ mod_05_deg_server <- function(id, pre_process, idep_data, load_data, tab) {
               descr = pre_process$descr()
             )
             # Check for returned errors
-            if ("character" %in% class(deg$limma)){
-              if (grepl("the model matrix is not full rank", deg$limma)){
+            limma_result <- deg$limma
+            if ("character" %in% class(limma_result)){
+              error_details(limma_result)
+              if (grepl("DEG_ERROR: FullRankError", limma_result) ||
+                  grepl("the model matrix is not full rank", limma_result)){
                 warning_type("FullRankError")
-                deg$limma <- NULL
+              } else if (grepl("DEG_ERROR: ContrastMismatch", limma_result)) {
+                warning_type("ContrastMismatch")
+              } else if (grepl("DEG_ERROR: NAContrast", limma_result)) {
+                warning_type("NAContrast")
+              } else if (grepl("DEG_ERROR: EmptyComparisons", limma_result)) {
+                warning_type("EmptyComparisons")
               } else {
-                warning_type("Unknown")
-                deg$limma <- NULL
+                warning_type("UnknownError")
               }
+              deg$limma <- NULL
             } else {
               updateTabsetPanel(
                 session = session,
@@ -924,26 +942,68 @@ mod_05_deg_server <- function(id, pre_process, idep_data, load_data, tab) {
       req(!is.null(warning_type()))
         modal_title <- switch(
           warning_type(),
-          "FullRankError" = "Please Check Experiment Design",
-          "NoComparison" = "No Comparison Selected",
-          "Unknown Error" = "Analysis Error Occurred"
+          "FullRankError"      = "Please Check Experiment Design",
+          "NoComparison"       = "No Comparison Selected",
+          "ContrastMismatch"   = "Comparison Labels Don't Match Design",
+          "NAContrast"         = "Invalid Contrast Matrix",
+          "EmptyComparisons"   = "No Valid Comparisons Found",
+          "UnknownError"       = "Analysis Error Occurred"
         )
         modal_text <- switch(
           warning_type(),
           "FullRankError" = paste(
-            'The model matrix generated for the analysis is not 
-            "full rank." This is often due to a flaw in the experimental 
-            design submitted. Check that all combinations of design factors are 
-            accounted for and have entries in your data.'
+            'The model matrix generated for the analysis is not ',
+            '"full rank." This is often due to a flaw in the experimental ',
+            'design submitted. Check that all combinations of design factors are ',
+            'accounted for and have entries in your data.'
           ),
           "NoComparison" = paste(
-          "No comparisons selected to perform Stats analysis on. Please select 
-          group comparisons (checkboxes) before submitting again."
-          ), 
+            "No comparisons selected to perform Stats analysis on. Please select",
+            "group comparisons (checkboxes) before submitting again."
+          ),
+          "ContrastMismatch" = {
+            raw <- error_details()
+            comp <- sub(".*comparison '([^']+)'.*", "\\1", raw)
+            missing_levels <- trimws(sub(".*not in design: (.*) -- design levels:.*", "\\1", raw))
+            design_lvls <- trimws(sub(".*-- design levels: (.*)", "\\1", raw))
+            tagList(
+              tags$p("One or more selected comparisons reference group labels that do not exist in the design matrix."),
+              tags$p(tags$b("Comparison: "), tags$code(comp)),
+              tags$p(tags$b("Missing level(s): "), tags$code(missing_levels)),
+              tags$p(tags$b("Available design levels: "), tags$code(design_lvls)),
+              tags$p("This often happens when a block/batch factor is selected without a matching main factor, or when leftover comparisons from a previous model are still checked.")
+            )
+          },
+          "NAContrast" = {
+            raw <- error_details()
+            na_cols <- trimws(sub(".*column\\(s\\): (.*) -- design levels:.*", "\\1", raw))
+            design_lvls <- trimws(sub(".*-- design levels: (.*)", "\\1", raw))
+            tagList(
+              tags$p("The contrast matrix contains missing values (NAs). A comparison string references a group name not present in the design matrix."),
+              tags$p(tags$b("Affected column(s): "), tags$code(na_cols)),
+              tags$p(tags$b("Available design levels: "), tags$code(design_lvls)),
+              tags$p("Verify that your selected comparisons use the exact group labels shown above.")
+            )
+          },
+          "EmptyComparisons" = {
+            raw <- error_details()
+            if (grepl("design levels:", raw)) {
+              detail_label <- "Available design levels:"
+              detail_val <- trimws(sub(".*design levels: (.*)", "\\1", raw))
+            } else {
+              detail_label <- "Groups detected:"
+              detail_val <- trimws(sub(".*from groups: (.*)", "\\1", raw))
+            }
+            tagList(
+              tags$p("All selected comparisons were filtered out because their group labels did not match the design matrix."),
+              tags$p(tags$b(detail_label), tags$code(detail_val)),
+              tags$p("This can happen when a block/batch factor is selected without a main factor, or when the selected comparisons don't correspond to the current factor settings. If batch/block is a technical variable rather than a factor of interest, try moving it to the Block factor field instead of Main factors.")
+            )
+          },
           "UnknownError" = paste(
-            "An unexpected error occurred during analysis. 
-             Please check your inputs and try again. If the error persists, 
-             contact the admin")
+            "An unexpected error occurred during analysis.",
+            "If the error persists, contact the admin."
+          )
         )
         showModal(
           modalDialog(
@@ -951,12 +1011,13 @@ mod_05_deg_server <- function(id, pre_process, idep_data, load_data, tab) {
             modal_text,
             easyClose = TRUE,
             footer = modalButton("Close"),
-            size = "s"
+            size = "m"
           ),
           session = session
         )
-        
+
         warning_type(NULL)
+        error_details(NULL)
     })
     
     deg_info <- reactive({
