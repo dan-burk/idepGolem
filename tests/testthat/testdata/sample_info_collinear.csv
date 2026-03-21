@@ -1,0 +1,4 @@
+,A_batch1_1,A_batch1_2,A_batch1_3,B_batch2_1,B_batch2_2,B_batch2_3,C_batch3_1,C_batch3_2,C_batch3_3
+condition,A,A,A,B,B,B,C,C,C
+batch,batch1,batch1,batch1,batch2,batch2,batch2,batch3,batch3,batch3
+condition_batch,A_batch1,A_batch1,A_batch1,B_batch2,B_batch2,B_batch2,C_batch3,C_batch3,C_batch3
