@@ -3,7 +3,7 @@ FROM rocker/shiny-verse:4.4.3
 
 # 1. Configure Posit Package Manager for prebuilt AMD64 binaries
 # This dramatically speeds up package installation (minutes instead of 30+ min)
-RUN echo 'options(repos = c(CRAN = "https://packagemanager.posit.co/cran/__linux__/jammy/latest"))' >> /usr/local/lib/R/etc/Rprofile.site
+RUN echo 'options(repos = c(CRAN = "https://packagemanager.posit.co/cran/__linux__/noble/latest"))' >> /usr/local/lib/R/etc/Rprofile.site
 
 # 2. System deps commonly needed by R packages (including cmake for nanonext/mcptools)
 RUN apt-get update && apt-get install -y \

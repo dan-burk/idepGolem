@@ -5,13 +5,14 @@
 - Two repos: `iDEP-SDSU/idep` (production Docker + `librarySetup.R`) and `gexijin/idepGolem` (this repo, Golem rewrite)
 - Production Docker image built from the other repo — not connected to this one
 - Neither repo pins versions. Only 5 archived packages have fixed versions (KEGG.db, PGSEA, ggalt, biclust)
-- `devtools::install_deps()` ignores `biocViews` — only reads `Imports`/`Suggests`/`Remotes`
+- `devtools::install_deps()` ignores the `biocViews` field — only reads `Imports`/`Suggests`/`Remotes`
+- We worked around this by duplicating biocViews packages into `Imports` and adding Bioc repos to `Rprofile.site`, so `install_deps()` now installs everything in one shot
 
 ## What We Changed So Far
 - Found 14 packages used in code but missing from `DESCRIPTION` — added to `Imports`
 - Duplicated `biocViews` packages into `Imports` so `install_deps()` picks them up
 - Restored `biocViews` section (kept for convention, but `install_deps` ignores it)
-- Added Bioconductor repos to `Rprofile.site` (container-local, needs to go into Dockerfile)
+- Added Bioconductor repos to `Rprofile.site` via `sudo sed` **(container-local only — NOT in Dockerfile yet, will be lost on rebuild)**
 - Added `biclust` and `ggalt` to `Remotes` (archived from CRAN)
 - Added `libmagick++-6.q16-dev` and `libproj-dev` to both Dockerfiles (missing system deps)
 - Added "Linux: Developer mode" section to `README.md`
@@ -29,9 +30,10 @@
 
 ### Base
 - **R**: 4.4.3
-- **Base image**: `rocker/shiny-verse:4.4.3` (Ubuntu Jammy 22.04)
+- **Base image**: `FROM rocker/shiny-verse:4.4.3` (Ubuntu Noble 24.04 — rocker switched from Jammy to Noble starting with R 4.4.2)
 - **Bioconductor**: 3.20
-- **Posit Package Manager**: `https://packagemanager.posit.co/cran/__linux__/jammy/latest`
+- **Posit Package Manager**: `https://packagemanager.posit.co/cran/__linux__/noble/latest`
+  - Was `jammy` — root cause of magick/proj4 `.so` failures. Fixed to `noble` in both Dockerfiles.
 
 ### System deps (apt-get)
 ```
@@ -164,24 +166,45 @@ RSPM = Posit Package Manager (binary), Bioc = Bioconductor, non-CRAN = archive/G
 ## 3-Phase Plan
 
 ### Phase 1: Get a working install — DONE
+
+**Prerequisites (container/system level):**
+1. Bioconductor repos must be configured in `Rprofile.site` (`/usr/local/lib/R/etc/Rprofile.site`)
+   so R can find Bioc packages. This is container-local — NOT in the repo. Needs to go into Dockerfile.
+   ```r
+   options(repos = c(
+     CRAN = "https://packagemanager.posit.co/cran/__linux__/jammy/latest",
+     BioCsoft = "https://bioconductor.org/packages/3.20/bioc",
+     BioCann = "https://bioconductor.org/packages/3.20/data/annotation",
+     BioCexp = "https://bioconductor.org/packages/3.20/data/experiment"
+   ))
+   ```
+2. System deps `libmagick++-6.q16-dev` and `libproj-dev` — already added to both Dockerfiles (amd64/arm64)
+
+**R install steps:**
 ```r
-install.packages(c("devtools", "BiocManager"))
+install.packages("devtools")
 
-# CRAN + Remotes deps from DESCRIPTION
-devtools::install_deps(".", dependencies = TRUE)
-
-# Bioconductor deps (reads biocViews dynamically from DESCRIPTION)
-bioc_pkgs <- trimws(unlist(strsplit(read.dcf("DESCRIPTION")[, "biocViews"], ",")))
-BiocManager::install(bioc_pkgs)
-
-# Archived packages that failed — manual source install
-install.packages("https://cran.r-project.org/src/contrib/Archive/biclust/biclust_2.0.3.1.tar.gz", repos = NULL, type = "source")
-install.packages("https://cran.r-project.org/src/contrib/Archive/ggalt/ggalt_0.4.0.tar.gz", repos = NULL, type = "source")
-
-# System lib mismatches — needed source rebuild
+# Pre-install packages that fail as binaries (binary .so mismatch with system libs)
 install.packages("magick", type = "source", repos = "https://cloud.r-project.org")
 install.packages("proj4", type = "source", repos = "https://cloud.r-project.org")
+
+# Now install everything else — these will already be satisfied from above
+devtools::install_deps(".", dependencies = TRUE)
+
+# If anything failed due to lock files or cascading errors, rerun:
+# devtools::install_deps(".", dependencies = TRUE)
 ```
+
+**Issues encountered during first install (2026-03-23):**
+| Issue | Root Cause | Fix |
+|-------|-----------|-----|
+| Rhdf5lib failed → cascaded to QUBIC, runibic, rhdf5, HDF5Array, SpatialExperiment, ReactomePA, GSVA | Stale lock file `00LOCK-Rhdf5lib` | `rm -rf /usr/local/lib/R/site-library/00LOCK-Rhdf5lib` |
+| SpatialExperiment failed | Missing `libmagick++-6.q16-dev` system dep | `apt-get install libmagick++-6.q16-dev` |
+| magick `.so` load failure | Binary compiled against `.so.8`, system has `.so.9` | Rebuild from source: `install.packages("magick", type="source", repos="https://cloud.r-project.org")` |
+| ggalt failed | Archived from CRAN + missing `libproj-dev` | `apt-get install libproj-dev`, rebuild proj4 from source, install ggalt from archive URL |
+| biclust failed | Archived from CRAN | Install from archive URL (now in `Remotes`) |
+| ottoPlots missing at runtime | Was in `Remotes` but not `Imports` | Added to `Imports` |
+
 Status: **complete** — 0 missing packages, app runs
 
 ### Phase 2: Snapshot with renv — NEXT
@@ -205,7 +228,14 @@ renv::snapshot()
 - Dev startup goes from ~1 hour to ~1 minute
 - Rebuild base image only when deps change
 
+## Issues for Upstream Maintainer
+- **Duplicate entries in DESCRIPTION Imports** (pre-existing, not introduced by us):
+  - `ggraph` — lines 31 and 72
+  - `tidytext` — lines 61 and 73
+  - `wordcloud2` — lines 66 and 74
+
 ## Open Questions
+- **Jammy vs Noble**: RESOLVED — rocker switched to Noble at R 4.4.2. Posit PM URLs fixed to `noble` in both Dockerfiles. With correct binaries, magick/proj4 source rebuilds may no longer be needed (verify on next clean install).
 - Should `biocViews` packages live only in `Imports`? Duplication works but is messy
 - Consolidate with production Docker build in `iDEP-SDSU/idep`?
 - Where to host base image? Docker Hub (public) vs GHCR (tied to repo)

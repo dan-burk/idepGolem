@@ -5,7 +5,7 @@ FROM rocker/r-ver:4.4.3
 
 # 1. Configure Posit Package Manager for prebuilt ARM64 binaries
 # This dramatically speeds up package installation (minutes instead of 30+ min)
-RUN echo 'options(repos = c(CRAN = "https://packagemanager.posit.co/cran/__linux__/jammy/latest"))' >> /usr/local/lib/R/etc/Rprofile.site
+RUN echo 'options(repos = c(CRAN = "https://packagemanager.posit.co/cran/__linux__/noble/latest"))' >> /usr/local/lib/R/etc/Rprofile.site
 
 # 2. System deps (still needed for some packages that compile from source)
 RUN apt-get update && apt-get install -y \
@@ -34,7 +34,7 @@ RUN apt-get update && apt-get install -y \
 
 # 3. Install Docker CLI (for spawning sibling MCP containers)
 RUN curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /usr/share/keyrings/docker-archive-keyring.gpg && \
-    echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] https://download.docker.com/linux/ubuntu jammy stable" > /etc/apt/sources.list.d/docker.list && \
+    echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] https://download.docker.com/linux/ubuntu noble stable" > /etc/apt/sources.list.d/docker.list && \
     apt-get update && apt-get install -y docker-ce-cli && \
     rm -rf /var/lib/apt/lists/*
 
