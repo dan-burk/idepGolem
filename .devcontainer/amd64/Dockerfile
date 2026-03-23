@@ -1,9 +1,9 @@
 # Pin to R 4.4.3 (matching ARM64) to prevent cache invalidation on base image updates
 FROM rocker/shiny-verse:4.4.3
 
-# 1. Configure Posit Package Manager for prebuilt AMD64 binaries
+# 1. Configure Posit Package Manager + Bioconductor repos
 # This dramatically speeds up package installation (minutes instead of 30+ min)
-RUN echo 'options(repos = c(CRAN = "https://packagemanager.posit.co/cran/__linux__/noble/latest"))' >> /usr/local/lib/R/etc/Rprofile.site
+RUN echo 'options(repos = c(CRAN = "https://packagemanager.posit.co/cran/__linux__/noble/latest", BioCsoft = "https://bioconductor.org/packages/3.20/bioc", BioCann = "https://bioconductor.org/packages/3.20/data/annotation", BioCexp = "https://bioconductor.org/packages/3.20/data/experiment"))' >> /usr/local/lib/R/etc/Rprofile.site
 
 # 2. System deps commonly needed by R packages (including cmake for nanonext/mcptools)
 RUN apt-get update && apt-get install -y \

@@ -3,9 +3,9 @@
 # doesn't distribute ARM64 binaries. Use rocker/r-ver instead.
 FROM rocker/r-ver:4.4.3
 
-# 1. Configure Posit Package Manager for prebuilt ARM64 binaries
+# 1. Configure Posit Package Manager + Bioconductor repos
 # This dramatically speeds up package installation (minutes instead of 30+ min)
-RUN echo 'options(repos = c(CRAN = "https://packagemanager.posit.co/cran/__linux__/noble/latest"))' >> /usr/local/lib/R/etc/Rprofile.site
+RUN echo 'options(repos = c(CRAN = "https://packagemanager.posit.co/cran/__linux__/noble/latest", BioCsoft = "https://bioconductor.org/packages/3.20/bioc", BioCann = "https://bioconductor.org/packages/3.20/data/annotation", BioCexp = "https://bioconductor.org/packages/3.20/data/experiment"))' >> /usr/local/lib/R/etc/Rprofile.site
 
 # 2. System deps (still needed for some packages that compile from source)
 RUN apt-get update && apt-get install -y \
