@@ -235,6 +235,7 @@ renv::snapshot()
   - `wordcloud2` — lines 66 and 74
 
 ## Open Questions
+- **Posit PM for Bioconductor**: Posit Package Manager also hosts Bioconductor packages (`https://packagemanager.posit.co/client/#/repos/bioconductor/setup`). Could replace bioconductor.org URLs with Posit PM URLs for prebuilt Bioc binaries — faster installs, no source compilation. Investigate correct repo URLs.
 - **Jammy vs Noble**: RESOLVED — rocker switched to Noble at R 4.4.2. Posit PM URLs fixed to `noble` in both Dockerfiles. With correct binaries, magick/proj4 source rebuilds may no longer be needed (verify on next clean install).
 - Should `biocViews` packages live only in `Imports`? Duplication works but is messy
 - Consolidate with production Docker build in `iDEP-SDSU/idep`?
