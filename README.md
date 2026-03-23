@@ -121,6 +121,31 @@ sudo docker rm idep
 ```
 After stopping it, you can restart it by repeating Step 2, which also pulls the latest iDEP image from DockerHub. We update it frequently, make sure you upgrade your image at least on a monthly basis.
 
+### Linux: Developer mode
+With this method, you can customize iDEP by editing the source code locally. We also welcome contributions through Pull Requests on GitHub.
+1. Install a [recent version of R](https://cloud.r-project.org/) (R 4.4+).
+2. Optional: Install an IDE such as [RStudio](https://posit.co/download/rstudio-desktop/) or [VS Code](https://code.visualstudio.com/) with the [R extension](https://marketplace.visualstudio.com/items?itemName=REditorSupport.r).
+3. Clone the repository.
+```console
+git clone https://github.com/gexijin/idepGolem.git
+cd idepGolem
+```
+4. Start R from the repository root and install all dependencies.
+```r
+install.packages(c("devtools", "BiocManager"))
+
+# Install CRAN + Remotes dependencies from DESCRIPTION
+devtools::install_deps(".", dependencies = TRUE)
+
+# Install Bioconductor dependencies (reads biocViews from DESCRIPTION)
+bioc_pkgs <- trimws(unlist(strsplit(read.dcf("DESCRIPTION")[, "biocViews"], ",")))
+BiocManager::install(bioc_pkgs)
+```
+5. Run the app in development mode.
+```r
+source("dev/run_dev.R")
+```
+If some R packages are missing, install them and try again. The app is divided into 12 Shiny modules (see `R/mod_*.R`).
 
 ### Re-running Prep reports from `.RData`
 Report downloads from the Prep tab now bundle the complete parameter list used to render the HTML report. To regenerate the same report locally:

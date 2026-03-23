@@ -1,0 +1,56 @@
+{
+  "name": "R in Docker (ARM64)",
+  "dockerComposeFile": "./docker-compose.yml",
+  "service": "devcontainer",
+  "workspaceFolder": "/workspaces/${localWorkspaceFolderBasename}",
+
+
+  "mounts": [
+    "source=${localWorkspaceFolder},target=/workspaces/${localWorkspaceFolderBasename},type=bind,consistency=cached"
+  ],
+
+  "features": {
+    "ghcr.io/devcontainers/features/github-cli:1": {}
+  },
+
+  // === Claude Code Authentication ===
+  // Cross-platform init script (works on Linux and Windows with bash)
+  "initializeCommand": "bash .devcontainer/arm64/init.sh",
+  // Option 2: .env file - Uncomment runArgs below, copy example_api.env to api.env
+  // "runArgs": ["--env-file", ".devcontainer/api.env"],
+  //
+  // Option 3: Environment variable from host (THE HACK - KNOWN TO WORK)
+  // Set CLAUDE_CODE_OAUTH_TOKEN on your host machine via: claude setup-token
+  // "remoteEnv": {
+  //   "CLAUDE_CODE_OAUTH_TOKEN": "${localEnv:CLAUDE_CODE_OAUTH_TOKEN}"
+  // },
+
+
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "REditorSupport.r",
+        "RDebugger.r-debugger",
+        "ms-azuretools.vscode-docker"
+      ],
+      "settings": {
+        "r.rterm.linux": "/usr/local/bin/R",
+        "r.alwaysUseActiveTerminal": true
+      }
+    }
+  },
+  
+  "remoteUser": "shiny",
+  "forwardPorts": [3838],
+  "portsAttributes": {
+    "3838": { "label": "Shiny app", "onAutoForward": "openBrowser" }
+  },
+  // Install AI CLI tools at container creation (not baked into image) for faster rebuilds
+  "onCreateCommand": "sudo npm install -g @anthropic-ai/claude-code @openai/codex @google/gemini-cli",
+  // Creates minimal config to skip onboarding wizard
+  // Optional: Use setup-claude-config.js to pull additional fields from host's ~/.claude.json
+  "postCreateCommand": "echo '{\"hasCompletedOnboarding\": true}' > ~/.claude.json",
+  // Refresh credentials from host on every VS Code attach (no rebuild needed)
+  // Re-auth on host, close VS Code window, reopen — done
+  "postAttachCommand": "cp -r /mnt/claude-host/. ~/.claude/ 2>/dev/null || true"
+}
