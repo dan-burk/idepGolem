@@ -8,6 +8,81 @@
 - `devtools::install_deps()` ignores the `biocViews` field — only reads `Imports`/`Suggests`/`Remotes`
 - We worked around this by duplicating biocViews packages into `Imports` and adding Bioc repos to `Rprofile.site`, so `install_deps()` now installs everything in one shot
 
+## Build Methodology Comparison
+
+### Original Production Build (`iDEP-SDSU/idep` repo → `gexijin/idep:latest`)
+
+The production Docker image is built from the `iDEP-SDSU/idep` repo, not this one. Its approach:
+
+**Dockerfile**: `FROM rocker/shiny:latest` (no version pinning — R version changes on any rebuild)
+
+**Package installation** (`classes/librarySetup.R`):
+1. Deletes ALL non-base packages from the R library (clean slate every build)
+2. Installs CRAN packages via `install.packages()` from `cran.rstudio.com` (source on Linux — no prebuilt binaries)
+3. Installs Bioconductor packages via `BiocManager::install()` (source tarballs from bioconductor.org, auto-detects Bioc version — no explicit pinning)
+4. Retries in a while loop until all packages install or nothing new succeeds
+5. Manually installs special cases: PGSEA + KEGG.db from Bioc archive URLs, ggalt from CRAN archive, ottoPlots from GitHub
+6. Installs idepGolem itself via `remotes::install_github("espors/idepGolem")` — note: installs from `espors`, not `gexijin` (likely a stale org reference)
+
+**Problems**:
+- No version pinning (R, Bioconductor, or packages) — builds are not reproducible
+- All packages compile from source on Linux — slow (potentially hours)
+- No PPM — misses the free performance win of prebuilt binaries
+- Retry-loop approach masks root causes of install failures
+- Deletes all packages every build — no caching, full rebuild every time
+- Installs idepGolem from wrong GitHub org (`espors` vs `gexijin`)
+
+**The old devcontainer** (`gexijin/idepGolem` repo, pre-fork) sidestepped all of this by using `FROM gexijin/idep:latest` — inheriting the production image with all packages pre-installed. This worked for development (edit code, run `dev/run_dev.R`, commit, push) but meant the dev environment was opaque and tied to production's build schedule.
+
+### Current Build (this repo, post-fork)
+
+**Dockerfile**: `FROM rocker/shiny-verse:4.4.3` (pinned R version, Ubuntu Noble 24.04)
+
+**Package installation**:
+1. CRAN packages: prebuilt Linux binaries from Posit Package Manager (PPM) — fast, no compilation
+2. Bioconductor packages: source tarballs from bioconductor.org (configured via `Rprofile.site` with explicit Bioc 3.20 repo URLs)
+3. Archived packages (biclust, ggalt): installed from source via archive URLs in `Remotes`
+4. Special packages (PGSEA, KEGG.db, ottoPlots): installed via `Remotes` field in `DESCRIPTION`
+5. Everything installed in one shot via `devtools::install_deps(".", dependencies = TRUE)`
+
+**Improvements over original**:
+- R version pinned (4.4.3) — reproducible base
+- Bioconductor version explicit (3.20) — no auto-detection surprises
+- CRAN packages install as prebuilt binaries via PPM — minutes instead of hours
+- All dependencies declared in `DESCRIPTION` — single `install_deps()` call, no manual scripts
+- System deps explicitly listed in Dockerfile
+
+**Remaining gap**: Bioconductor packages still compile from source (~30 packages + their deps). This is what the PPM Bioconductor change (Phase 1.5) addresses.
+
+### Proposed Build (PPM for Bioconductor)
+
+Same as current, but Bioconductor packages also install as prebuilt binaries from PPM.
+
+**Change**: Replace manual Bioc repo URLs in `Rprofile.site` with PPM's BiocManager mirror configuration:
+```r
+# Old: manual Bioc URLs (source tarballs from bioconductor.org)
+options(repos = c(
+  CRAN = "https://packagemanager.posit.co/cran/__linux__/noble/latest",
+  BioCsoft = "https://bioconductor.org/packages/3.20/bioc",
+  BioCann  = "https://bioconductor.org/packages/3.20/data/annotation",
+  BioCexp  = "https://bioconductor.org/packages/3.20/data/experiment"
+))
+
+# New: PPM as BiocManager mirror (prebuilt binaries for Ubuntu Noble)
+options(
+  BioC_mirror = "https://packagemanager.posit.co/bioconductor/latest",
+  BIOCONDUCTOR_CONFIG_FILE = "https://packagemanager.posit.co/bioconductor/latest/config.yaml",
+  repos = c(CRAN = "https://packagemanager.posit.co/cran/__linux__/noble/latest")
+)
+Sys.setenv("R_BIOC_VERSION" = "3.20")
+```
+
+**Why**:
+- **Speed**: Bioconductor packages install as prebuilt binaries instead of compiling from source
+- **Reproducibility**: Bioc version explicitly pinned via `R_BIOC_VERSION`, PPM mirrors the same packages as bioconductor.org
+- **No downside if PPM has full coverage**: PPM serves the same packages at the same versions — just pre-compiled. However, the new config removes the bioconductor.org URLs entirely, so if PPM is missing a package (e.g., a niche annotation DB), the install will fail rather than fall back. Must verify coverage of all ~30 Bioc packages before committing to this approach
+- **Official approach**: This is the configuration recommended by PPM's own setup page for Ubuntu Noble + Bioconductor 3.20
+
 ## What We Changed So Far
 - Found 14 packages used in code but missing from `DESCRIPTION` — added to `Imports`
 - Duplicated `biocViews` packages into `Imports` so `install_deps()` picks them up
@@ -233,9 +308,47 @@ renv::snapshot()
   - `ggraph` — lines 31 and 72
   - `tidytext` — lines 61 and 73
   - `wordcloud2` — lines 66 and 74
+- **Wrong GitHub org in `librarySetup.R`**: `iDEP-SDSU/idep/classes/librarySetup.R` installs idepGolem from `espors/idepGolem` instead of `gexijin/idepGolem` — likely a stale reference to an old org
+
+## PPM for Bioconductor Binaries (Phase 1.5)
+
+**Status**: Ready to test
+
+**Problem**: Bioconductor packages install from source tarballs via bioconductor.org, requiring compilation. PPM can serve prebuilt Linux binaries for Bioc packages, but only when configured through BiocManager (not via direct repo URLs).
+
+**What to change in both Dockerfiles** (`amd64/Dockerfile` line 6, `arm64/Dockerfile` line 8):
+
+Old `Rprofile.site` config (manual Bioc repo URLs, source-only):
+```r
+options(repos = c(
+  CRAN = "https://packagemanager.posit.co/cran/__linux__/noble/latest",
+  BioCsoft = "https://bioconductor.org/packages/3.20/bioc",
+  BioCann  = "https://bioconductor.org/packages/3.20/data/annotation",
+  BioCexp  = "https://bioconductor.org/packages/3.20/data/experiment"
+))
+```
+
+New `Rprofile.site` config (PPM as BiocManager mirror, serves prebuilt binaries):
+```r
+options(
+  BioC_mirror = "https://packagemanager.posit.co/bioconductor/latest",
+  BIOCONDUCTOR_CONFIG_FILE = "https://packagemanager.posit.co/bioconductor/latest/config.yaml",
+  repos = c(CRAN = "https://packagemanager.posit.co/cran/__linux__/noble/latest")
+)
+Sys.setenv("R_BIOC_VERSION" = "3.20")
+```
+
+**Why this works**: PPM's setup page (`https://packagemanager.posit.co/client/#/repos/bioconductor/setup?distribution=ubuntu-24.04&bioconductor_version=3.20&snapshot=latest`) confirms this is the official approach. Setting `BioC_mirror` and `BIOCONDUCTOR_CONFIG_FILE` lets BiocManager resolve the correct sub-repo URLs and serve Ubuntu Noble binaries automatically.
+
+**Verification steps**:
+1. Rebuild container
+2. Run `install.packages("BiocManager"); BiocManager::repositories()` — should show PPM URLs
+3. Run `devtools::install_deps(".", dependencies = TRUE)` — Bioc packages should install as binaries (fast, no compilation)
+4. If magick/proj4 install as binaries without `.so` errors, remove them from the "source compilation required" list
+
+**No new system deps needed**: The PPM setup page lists system deps for all ~2000 Bioc packages. Our ~30 Bioc deps only need libs we already have (`build-essential`, `libglpk-dev`, `libmagick++-6.q16-dev`, `libxml2-dev`, `libssl-dev`, `libcurl4-openssl-dev`).
 
 ## Open Questions
-- **Posit PM for Bioconductor**: Posit Package Manager also hosts Bioconductor packages (`https://packagemanager.posit.co/client/#/repos/bioconductor/setup`). Could replace bioconductor.org URLs with Posit PM URLs for prebuilt Bioc binaries — faster installs, no source compilation. Investigate correct repo URLs.
 - **Jammy vs Noble**: RESOLVED — rocker switched to Noble at R 4.4.2. Posit PM URLs fixed to `noble` in both Dockerfiles. With correct binaries, magick/proj4 source rebuilds may no longer be needed (verify on next clean install).
 - Should `biocViews` packages live only in `Imports`? Duplication works but is messy
 - Consolidate with production Docker build in `iDEP-SDSU/idep`?
