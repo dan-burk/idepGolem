@@ -1,11 +1,11 @@
-# Pin to R 4.4.3 (matching ARM64) to prevent cache invalidation on base image updates
-FROM rocker/shiny-verse:4.4.3
+# Pin to R 4.5.1 (matching production iDEP) to prevent cache invalidation on base image updates
+FROM rocker/shiny-verse:4.5.1
 
 # 1. Configure Posit Package Manager for CRAN + Bioconductor (prebuilt binaries)
 # BioC_mirror + BIOCONDUCTOR_CONFIG_FILE let BiocManager resolve sub-repos from PPM
 # This serves prebuilt Linux binaries for both CRAN and Bioconductor packages
 RUN echo 'options(BioC_mirror = "https://packagemanager.posit.co/bioconductor/latest", BIOCONDUCTOR_CONFIG_FILE = "https://packagemanager.posit.co/bioconductor/latest/config.yaml", repos = c(CRAN = "https://packagemanager.posit.co/cran/__linux__/noble/latest"))' >> /usr/local/lib/R/etc/Rprofile.site && \
-    echo 'Sys.setenv("R_BIOC_VERSION" = "3.20")' >> /usr/local/lib/R/etc/Rprofile.site
+    echo 'Sys.setenv("R_BIOC_VERSION" = "3.21")' >> /usr/local/lib/R/etc/Rprofile.site
 
 # 2. System deps commonly needed by R packages (including cmake for nanonext/mcptools)
 RUN apt-get update && apt-get install -y \

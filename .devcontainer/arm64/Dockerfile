@@ -1,13 +1,13 @@
 # Use native multi-arch image (works on ARM64 and AMD64)
 # Note: rocker/shiny-verse has limited ARM64 support because Shiny Server
 # doesn't distribute ARM64 binaries. Use rocker/r-ver instead.
-FROM rocker/r-ver:4.4.3
+FROM rocker/r-ver:4.5.1
 
 # 1. Configure Posit Package Manager for CRAN + Bioconductor (prebuilt binaries)
 # BioC_mirror + BIOCONDUCTOR_CONFIG_FILE let BiocManager resolve sub-repos from PPM
 # This serves prebuilt Linux binaries for both CRAN and Bioconductor packages
 RUN echo 'options(BioC_mirror = "https://packagemanager.posit.co/bioconductor/latest", BIOCONDUCTOR_CONFIG_FILE = "https://packagemanager.posit.co/bioconductor/latest/config.yaml", repos = c(CRAN = "https://packagemanager.posit.co/cran/__linux__/noble/latest"))' >> /usr/local/lib/R/etc/Rprofile.site && \
-    echo 'Sys.setenv("R_BIOC_VERSION" = "3.20")' >> /usr/local/lib/R/etc/Rprofile.site
+    echo 'Sys.setenv("R_BIOC_VERSION" = "3.21")' >> /usr/local/lib/R/etc/Rprofile.site
 
 # 2. System deps (still needed for some packages that compile from source)
 RUN apt-get update && apt-get install -y \

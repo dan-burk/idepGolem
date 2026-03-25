@@ -146,10 +146,10 @@ biocViews:
     org.Xl.eg.db
 Remotes:
     github::espors/ottoPlots,
-    url::https://bioconductor.org/packages/3.10/bioc/src/contrib/PGSEA_1.60.0.tar.gz,
-    url::http://www.bioconductor.org/packages//2.11/data/annotation/src/contrib/KEGG.db_2.8.0.tar.gz,
-    url::https://cran.r-project.org/src/contrib/Archive/biclust/biclust_2.0.3.1.tar.gz,
-    url::https://cran.r-project.org/src/contrib/Archive/ggalt/ggalt_0.4.0.tar.gz
+    PGSEA=url::https://bioconductor.org/packages/3.10/bioc/src/contrib/PGSEA_1.60.0.tar.gz,
+    KEGG.db=url::http://www.bioconductor.org/packages//2.11/data/annotation/src/contrib/KEGG.db_2.8.0.tar.gz,
+    biclust=url::https://cran.r-project.org/src/contrib/Archive/biclust/biclust_2.0.3.1.tar.gz,
+    ggalt=url::https://cran.r-project.org/src/contrib/Archive/ggalt/ggalt_0.4.0.tar.gz
 Encoding: UTF-8
 LazyData: true
 RoxygenNote: 7.3.3
