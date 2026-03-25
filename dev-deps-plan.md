@@ -302,11 +302,32 @@ sink()
 Status: **complete** — 0 missing packages, app runs
 
 ### Phase 2: Snapshot with renv — NEXT
+
+**renv is the R equivalent of Python's venv + pip freeze:**
+
+| | Python | R |
+|---|---|---|
+| Lockfile | `requirements.txt` / `poetry.lock` | `renv.lock` |
+| Environment dir | `.venv/` | `renv/library/` |
+| Activate | `source .venv/bin/activate` | `source("renv/activate.R")` (auto via `.Rprofile`) |
+| Install from lock | `pip install -r requirements.txt` | `renv::restore()` |
+| Save current state | `pip freeze` | `renv::snapshot()` |
+| Gitignored | `.venv/` | `renv/library/` |
+| Committed | `requirements.txt` | `renv.lock` + `renv/activate.R` |
+
+Key difference from Python: renv activates automatically via `.Rprofile` whenever R starts in the project directory — no manual `activate` step. And `renv.lock` is richer than `requirements.txt` — it records the exact version, source (CRAN/Bioc/GitHub/URL), and hash for every package.
+
+**What renv.lock does NOT record**: whether a package was installed as binary or source. That's determined at `renv::restore()` time based on the platform and what repos serve. Same lockfile restores differently on macOS (macOS binaries) vs Ubuntu+PPM (CRAN binaries, Bioc from source) vs Ubuntu without PPM (all source).
+
+**What to commit vs gitignore** (`renv::init()` sets this up automatically):
+- **Commit**: `renv.lock`, `renv/activate.R`, `renv/settings.json`, `.Rprofile`
+- **Gitignored by renv**: `renv/library/`, `renv/staging/`, `renv/sandbox/`
+
 ```r
 renv::init()
 renv::snapshot()
 ```
-- Captures every package + exact version + source (binary vs source) into `renv.lock`
+- Captures every package + exact version + source repo into `renv.lock`
 - Commit `renv.lock` — first time this project has reproducible deps
 - `renv.lock` becomes the single source of truth, replacing the table above
 

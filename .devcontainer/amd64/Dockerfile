@@ -43,7 +43,7 @@ RUN curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /
 # 4. Install all R packages needed for analysis, IDE integration, and MCP
 # Note: tidyverse and shiny are already in the shiny-verse base image — not listed here
 # dependencies=NA skips optional "Suggests" (e.g., otelsdk) for faster builds
-RUN R -e "options(warn = 2); install.packages(c('readxl', 'fst', 'jsonlite', 'plotly', 'randomForest', 'nnet', 'caret', 'pROC', 'dbscan', 'umap', 'igraph', 'networkD3', 'fastDummies', 'smotefamily', 'rstudioapi', 'languageserver', 'btw', 'ellmer', 'mcptools', 'Rprofet'), dependencies = NA)"
+RUN R -e "options(warn = 2); install.packages(c('readxl', 'fst', 'jsonlite', 'plotly', 'randomForest', 'nnet', 'caret', 'pROC', 'dbscan', 'umap', 'igraph', 'networkD3', 'fastDummies', 'smotefamily', 'rstudioapi', 'languageserver', 'btw', 'ellmer', 'mcptools', 'Rprofet', 'renv'), dependencies = NA)"
 
 # 5. Install Node.js LTS from NodeSource
 RUN curl -fsSL https://deb.nodesource.com/setup_lts.x | bash - \
