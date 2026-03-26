@@ -173,6 +173,7 @@ needed, package.json should be updated. If v24 is fine, the ensure step shouldn'
 changes between v24 and v26.
 
 **Verdict:** _TBD_
+**Changes:** We upgraded Electron stack: 31→39, electron-builder 24→26, Node 20→22
 
 ---
 
@@ -187,6 +188,7 @@ Electron 33 was current by then. Any reason for pinning to an already-EOL versio
 **Risk:** No security patches. Chromium vulnerabilities in the bundled browser engine.
 
 **Verdict:** _TBD_
+**Changes:** We upgraded Electron stack: 31→39, electron-builder 24→26, Node 20→22
 
 ---
 
@@ -328,6 +330,7 @@ developer unaware that Node 20 includes it?
 **Risk:** Unnecessary dependency bloat. Minor.
 
 **Verdict:** _TBD_
+**Changes:** We upgraded Electron stack: 31→39, electron-builder 24→26, Node 20→22
 
 ---
 
@@ -494,7 +497,7 @@ was delivered already outdated. These components are tightly coupled — they ca
 upgraded independently. This compounds the technical debt from #5 and #6.
 
 **Verdict:** _TBD_
-**Changes:** We converged everything to R version 4.5.1 (R Tools to 45 for Windows)
+**Changes:** We upgraded Electron stack: 31→39, electron-builder 24→26, Node 20→22
 
 ---
 
