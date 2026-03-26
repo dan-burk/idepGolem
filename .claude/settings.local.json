@@ -12,7 +12,11 @@
       "Bash(if [ -f /workspaces/idepGolem/data/demo/demo_data_info.csv ])",
       "Bash(then cat /workspaces/idepGolem/data/demo/demo_data_info.csv)",
       "Bash(elif find /workspaces/idepGolem -name demo_data_info.csv)",
-      "Bash(xargs cat:*)"
+      "Bash(xargs cat:*)",
+      "Bash(RDEST=\"/home/daniel/Documents/GitHub/idepGolem/electron/scripts/r-linux/R\")",
+      "Bash(export R_HOME=\"$RDEST\")",
+      "Bash(strace -f -e trace=execve \"$RDEST/bin/Rscript\" -e 'cat\\(\"\"\"\"hi\\\\n\"\"\"\"\\)')",
+      "Bash(gh api:*)"
     ],
     "deny": [],
     "ask": []

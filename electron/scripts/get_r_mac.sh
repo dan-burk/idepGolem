@@ -72,3 +72,45 @@ ditto "${RFRAMEWORK_DEST}/Resources" "${RDEST}"
 echo "Rscript version:"
 "${RDEST}/bin/Rscript" --version
 echo "✅ macOS R runtime ready at: ${RDEST}"
+
+# ==================== Install R Packages ====================
+echo ""
+echo "==================== Installing R packages via renv ===================="
+
+PROJ_ROOT="${SCRIPT_DIR}/../.."
+LOCKFILE="${PROJ_ROOT}/renv.lock"
+if [[ ! -f "${LOCKFILE}" ]]; then
+  echo "ERROR: renv.lock not found at ${LOCKFILE}" >&2
+  exit 1
+fi
+LOCKFILE="$(cd "$(dirname "${LOCKFILE}")" && pwd)/$(basename "${LOCKFILE}")"
+
+LIB="${RDEST}/library"
+
+echo "Lockfile : ${LOCKFILE}"
+echo "Library  : ${LIB}"
+echo ""
+
+# Install renv into the staged R
+echo "Installing renv ..."
+"${RDEST}/bin/Rscript" -e 'install.packages("renv", repos = "https://cloud.r-project.org", quiet = TRUE)'
+
+# Install BiocManager (renv needs it to resolve Bioconductor packages)
+echo "Installing BiocManager ..."
+"${RDEST}/bin/Rscript" -e 'install.packages("BiocManager", repos = "https://cloud.r-project.org", quiet = TRUE)'
+
+# Restore all packages from lockfile into the staged library
+echo "Running renv::restore() — this will take a while ..."
+"${RDEST}/bin/Rscript" -e "
+  options(warn = 1)
+  renv::restore(
+    lockfile = '${LOCKFILE}',
+    library  = '${LIB}',
+    prompt   = FALSE
+  )
+"
+
+echo ""
+echo "Installed packages:"
+"${RDEST}/bin/Rscript" -e "cat(length(list.dirs('${LIB}', recursive = FALSE)), 'packages in', '${LIB}', '\n')"
+echo "✅ R packages installed"

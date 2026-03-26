@@ -80,6 +80,41 @@ try {
   & $destRscript --version
 
   Write-Host "✅ Windows R runtime ready under $destR"
+
+  # ==================== Install R Packages ====================
+  Write-Host ""
+  Write-Host "==================== Installing R packages via renv ===================="
+
+  $projRoot = Resolve-Path (Join-Path $PSScriptRoot "..\..") | Select-Object -ExpandProperty Path
+  $lockfile = Join-Path $projRoot "renv.lock"
+  if (-not (Test-Path $lockfile)) { throw "renv.lock not found at $lockfile" }
+
+  $lib = Join-Path $destR "library"
+
+  Write-Host "Lockfile : $lockfile"
+  Write-Host "Library  : $lib"
+  Write-Host ""
+
+  # Install renv into the staged R
+  Write-Host "Installing renv ..."
+  & $destRscript -e "install.packages('renv', repos = 'https://cloud.r-project.org', quiet = TRUE)"
+
+  # Install BiocManager (renv needs it to resolve Bioconductor packages)
+  Write-Host "Installing BiocManager ..."
+  & $destRscript -e "install.packages('BiocManager', repos = 'https://cloud.r-project.org', quiet = TRUE)"
+
+  # Restore all packages from lockfile into the staged library
+  # Use forward slashes in paths for R compatibility
+  $lockfileR = $lockfile -replace '\\', '/'
+  $libR = $lib -replace '\\', '/'
+
+  Write-Host "Running renv::restore() - this will take a while ..."
+  & $destRscript -e "options(warn = 1); renv::restore(lockfile = '$lockfileR', library = '$libR', prompt = FALSE)"
+
+  Write-Host ""
+  $pkgCount = (Get-ChildItem -Directory -Path $lib).Count
+  Write-Host "$pkgCount packages installed in $lib"
+  Write-Host "✅ R packages installed"
 }
 finally {
   if (Test-Path $tmp) {

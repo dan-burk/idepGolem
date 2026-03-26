@@ -11,3 +11,7 @@ Rplots.pdf
 /electron/electron/*
 /node_modules
 /data113/*
+/electron/scripts/*.log
+/electron/scripts/r-linux/
+/electron/scripts/r-mac/
+/electron/runtime/

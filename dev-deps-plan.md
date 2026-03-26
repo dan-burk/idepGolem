@@ -106,6 +106,7 @@ Key difference: renv activates automatically via `.Rprofile` whenever R starts i
 ```r
 renv::init()
 renv::snapshot()
+renv::restore()
 ```
 
 ## Upgrade to R 4.5.1 / Bioconductor 3.21 — NEXT
