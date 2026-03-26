@@ -14,7 +14,8 @@
       "Bash(elif find /workspaces/idepGolem -name demo_data_info.csv)",
       "Bash(xargs cat:*)",
       "Bash(fi)",
-      "Bash(cat:*)"
+      "Bash(cat:*)",
+      "Bash(grep:*\\\\)"
     ],
     "deny": [],
     "ask": []

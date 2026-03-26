@@ -114,15 +114,6 @@ if (!"KEGG.db" %in% rownames(installed.packages(lib.loc=lib))) {
 }
 ```
 
-## What's NOT affected
-
-| Component | Why it's safe |
-|-----------|---------------|
-| **Production Docker** (iDEP-SDSU/idep) | Completely separate repo, separate build |
-| **devtools::install_deps()** (dev workflow) | Reads `Remotes` — our changes actually fixed this path |
-| **Rprofile.site** | Container-local, not in Electron builds |
-| **Devcontainer Dockerfiles** | Only affect dev environment |
-
 ## Suggested fix strategy
 
 ### Option A: Update workflows to match DESCRIPTION (minimal)

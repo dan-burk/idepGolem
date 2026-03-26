@@ -104,7 +104,7 @@ jobs:
       - name: Setup R
         uses: r-lib/actions/setup-r@v2
         with:
-          r-version: '4.4.1'
+          r-version: '4.5.1'
 
       # Mirror R.home() into runtime/R.framework/Resources
       - name: Stage R.framework (mirror R.home() into runtime/R.framework/Resources)

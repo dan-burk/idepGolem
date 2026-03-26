@@ -3,7 +3,7 @@ $ErrorActionPreference = "Stop"
 
 # -------- Config --------
 $Rver = $env:R_VERSION
-if (-not $Rver -or $Rver -eq "") { $Rver = "4.4.2" }   # default version
+if (-not $Rver -or $Rver -eq "") { $Rver = "4.5.1" }   # default version
 
 Write-Host "Using R version: $Rver"
 

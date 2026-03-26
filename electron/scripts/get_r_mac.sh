@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # ==================== Config ====================
-VER="${R_VERSION:-4.5.2}"   # override with env R_VERSION=...
+VER="${R_VERSION:-4.5.1}"   # override with env R_VERSION=...
 # Auto-detect ARCH unless overridden via R_ARCH
 if [[ -z "${R_ARCH:-}" ]]; then
   case "$(uname -m)" in
