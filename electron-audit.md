@@ -149,6 +149,7 @@ list, all 18 `org.*.db` annotation databases, archived packages with no special 
 and fix strategies.
 
 **Verdict:** _TBD_
+**Changes:** Make a renv.lock file that's stable for R 4.5.1 and then replace the ~50+ lines of install code per (mac, linux, windows) workflow with renv::restore(library = lib). Making sure we add library argument to point to custom install pacth for Electron.
 
 ---
 
