@@ -12,10 +12,7 @@
       "Bash(if [ -f /workspaces/idepGolem/data/demo/demo_data_info.csv ])",
       "Bash(then cat /workspaces/idepGolem/data/demo/demo_data_info.csv)",
       "Bash(elif find /workspaces/idepGolem -name demo_data_info.csv)",
-      "Bash(xargs cat:*)",
-      "Bash(fi)",
-      "Bash(cat:*)",
-      "Bash(grep:*\\\\)"
+      "Bash(xargs cat:*)"
     ],
     "deny": [],
     "ask": []
