@@ -459,6 +459,45 @@ Should be "Windows." Minor, but combined with other items, suggests rushed work.
 
 ---
 
+## 21. CI Node Version Pinned to Near-EOL Node 20
+
+All three CI workflows pin `node-version: 20`:
+
+| File | Line |
+|------|------|
+| `build-electron-windows.yml` | `:82` |
+| `build-electron-linux.yml` | `:90` |
+| `build-electron-mac.yml` | `:82` |
+
+Node 20 reaches end-of-life in **April 2026**. At the time of the commit (Nov 2025),
+Node 22 had been the active LTS since October 2024 — over a year. Node 20 was already
+in maintenance mode.
+
+This choice is consistent with Electron 31 bundling Node 20.x internally, but Electron 31
+was itself already EOL by the time this work was committed (see #6). The entire version
+chain was outdated at time of delivery:
+
+| Component | Version Delivered (Nov 2025) | What Was Current (Nov 2025) |
+|-----------|----------------------------|----------------------------|
+| Electron | 31.7.7 (EOL early 2025) | 33.x |
+| Chromium (bundled in Electron) | 126 | 130+ |
+| Node.js (bundled in Electron) | 20.x (maintenance) | 22.x (active LTS) |
+| Node.js (CI build toolchain) | 20 (maintenance) | 22 (active LTS) |
+| electron-builder | 24.13.3 (see #5) | 25.x+ |
+
+**Question:** Why were EOL/maintenance versions chosen across the board? Electron 33 and
+Node 22 LTS were both well-established by November 2025. Was this based on a tutorial or
+template that used older versions, or was there a specific compatibility concern?
+
+**Risk:** The entire Electron dependency chain (Electron → Chromium → Node → electron-builder)
+was delivered already outdated. These components are tightly coupled — they cannot be
+upgraded independently. This compounds the technical debt from #5 and #6.
+
+**Verdict:** _TBD_
+**Changes:** We converged everything to R version 4.5.1 (R Tools to 45 for Windows)
+
+---
+
 ## Summary Table
 
 | # | Issue | Severity | Likely Explanation |
@@ -483,6 +522,7 @@ Should be "Windows." Minor, but combined with other items, suggests rushed work.
 | 18 | Workflows not feature-symmetric | Medium | Evolved unevenly |
 | 19 | Placeholder description | Low | Template not updated |
 | 20 | Typo in commit message | Low | Rushed |
+| 21 | CI Node 20 was already maintenance-mode at delivery | **High** | Entire Electron/Node/Chromium chain delivered outdated |
 
 ---
 

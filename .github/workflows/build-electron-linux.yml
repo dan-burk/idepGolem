@@ -87,7 +87,7 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: npm
           cache-dependency-path: ${{ env.PACKAGE_DIR }}/package-lock.json
 
@@ -106,8 +106,8 @@ jobs:
         working-directory: ${{ env.PACKAGE_DIR }}
         run: |
           set -euxo pipefail
-          if ! npx --yes --package=electron-builder@26.0.12 --call "echo ok" >/dev/null 2>&1; then
-            npm install -D electron-builder@26.0.12
+          if ! npx --yes --package=electron-builder@26.8.2 --call "echo ok" >/dev/null 2>&1; then
+            npm install -D electron-builder@26.8.2
           fi
 
       - name: Setup R

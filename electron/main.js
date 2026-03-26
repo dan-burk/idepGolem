@@ -4,7 +4,7 @@ const path = require('path');
 const fs = require('fs');
 const { spawn } = require('child_process');
 const net = require('net');
-const { fetch } = require('undici');
+// Node 22+ (bundled in Electron 39) provides global fetch natively
 
 let childProc = null;
 
