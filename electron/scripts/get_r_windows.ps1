@@ -1,6 +1,16 @@
 # electron/scripts/get_r_windows.ps1
 $ErrorActionPreference = "Stop"
 
+# ==================== Logging ====================
+# All output goes to both terminal and logfile
+$scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Definition
+$timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
+$logFile = Join-Path $scriptDir "get_r_windows_${timestamp}.log"
+
+# Start a transcript so every Write-Host / stdout / stderr line is captured
+Start-Transcript -Path $logFile -Append
+Write-Host "Logging to: $logFile"
+
 # -------- Config --------
 $Rver = $env:R_VERSION
 if (-not $Rver -or $Rver -eq "") { $Rver = "4.5.1" }   # default version
@@ -108,8 +118,33 @@ try {
   $lockfileR = $lockfile -replace '\\', '/'
   $libR = $lib -replace '\\', '/'
 
+  # renv 1.2.0 bug (rstudio/renv#2249): when DESCRIPTION fetch fails for
+  # non-repository packages (URL, GitHub), renv copies lockfile fields
+  # (JSON arrays) into desc as-is.  renv_description_parse_field() then
+  # crashes on is.na(vector).  We patch it to collapse vectors to strings
+  # before the original logic runs.  The return type (data_frame) is unchanged.
   Write-Host "Running renv::restore() - this will take a while ..."
-  & $destRscript -e "options(warn = 1); renv::restore(lockfile = '$lockfileR', library = '$libR', prompt = FALSE)"
+  & $destRscript -e @"
+options(warn = 1)
+
+# Grab the original function from the renv namespace
+orig <- get('renv_description_parse_field', envir = asNamespace('renv'))
+
+# Wrap it: collapse list/vector fields to a single string, then delegate
+patched <- function(field) {
+  if (length(field) > 1L)
+    field <- paste(unlist(field), collapse = ', ')
+  orig(field)
+}
+environment(patched) <- environment(orig)
+utils::assignInNamespace('renv_description_parse_field', patched, ns = 'renv')
+
+renv::restore(
+  lockfile = '$lockfileR',
+  library  = '$libR',
+  prompt   = FALSE
+)
+"@
 
   Write-Host ""
   $pkgCount = (Get-ChildItem -Directory -Path $lib).Count
@@ -121,4 +156,5 @@ finally {
     Write-Host "Cleaning up temp dir $tmp ..."
     Remove-Item -Recurse -Force $tmp
   }
+  Stop-Transcript
 }
