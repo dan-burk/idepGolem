@@ -18,6 +18,10 @@ iDEP (Integrated Differential Expression & Pathway analysis) is a bioinformatics
 - **Install from GitHub**: `devtools::install_github("https://github.com/gexijin/idepGolem", upgrade = "never")`
 - **Install dependencies**: Run the above command first (355 dependencies)
 
+### Electron (Desktop build)
+- **Windows R runtime + packages**: `cd electron\scripts && powershell -ExecutionPolicy Bypass -File .\get_r_windows.ps1`
+- **Linux R runtime + packages**: `cd electron/scripts && bash get_r_linux.sh`
+
 ### Docker (Alternative deployment)
 - **Run with Docker**: `docker run --pull always -d --name idep -p 3838:3838 gexijin/idep:latest`
 - **Access**: `http://localhost:3838`

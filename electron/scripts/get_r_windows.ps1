@@ -87,7 +87,7 @@ try {
   if (-not (Test-Path $destRdll)) { Write-Host "Warning: $destRdll not found (some builds place R.dll under bin only)"; }
 
   Write-Host "Rscript located at: $destRscript"
-  & $destRscript --version
+  & $destRscript --version 2>&1 | Write-Host
 
   Write-Host "✅ Windows R runtime ready under $destR"
 
@@ -107,11 +107,11 @@ try {
 
   # Install renv into the staged R
   Write-Host "Installing renv ..."
-  & $destRscript -e "install.packages('renv', repos = 'https://cloud.r-project.org', quiet = TRUE)"
+  & $destRscript -e "install.packages('renv', repos = 'https://cloud.r-project.org', quiet = TRUE)" 2>&1 | Write-Host
 
   # Install BiocManager (renv needs it to resolve Bioconductor packages)
   Write-Host "Installing BiocManager ..."
-  & $destRscript -e "install.packages('BiocManager', repos = 'https://cloud.r-project.org', quiet = TRUE)"
+  & $destRscript -e "install.packages('BiocManager', repos = 'https://cloud.r-project.org', quiet = TRUE)" 2>&1 | Write-Host
 
   # Restore all packages from lockfile into the staged library
   # Use forward slashes in paths for R compatibility
@@ -123,14 +123,28 @@ try {
   # (JSON arrays) into desc as-is.  renv_description_parse_field() then
   # crashes on is.na(vector).  We patch it to collapse vectors to strings
   # before the original logic runs.  The return type (data_frame) is unchanged.
-  Write-Host "Running renv::restore() - this will take a while ..."
-  & $destRscript -e @"
+  # Write R restore script to a temp file (PowerShell here-strings passed
+  # via -e don't work reliably with Rscript on Windows)
+  $restoreScript = Join-Path $tmp "renv_restore.R"
+  Set-Content -Path $restoreScript -Value @"
 options(warn = 1)
 
-# Grab the original function from the renv namespace
+# Posit Package Manager (in renv.lock) only serves Linux binaries.
+# Override renv's lockfile repos with mirrors that serve Windows binaries.
+options(renv.config.repos.override = c(
+  CRAN    = 'https://cloud.r-project.org',
+  BioCsoft = 'https://bioconductor.org/packages/3.21/bioc',
+  BioCann  = 'https://bioconductor.org/packages/3.21/data/annotation',
+  BioCexp  = 'https://bioconductor.org/packages/3.21/data/experiment'
+))
+
+# renv 1.2.0 bug (rstudio/renv#2249): when DESCRIPTION fetch fails for
+# non-repository packages (URL, GitHub), renv copies lockfile fields
+# (JSON arrays) into desc as-is.  renv_description_parse_field() then
+# crashes on is.na(vector).  We patch it to collapse vectors to strings
+# before the original logic runs.  The return type (data_frame) is unchanged.
 orig <- get('renv_description_parse_field', envir = asNamespace('renv'))
 
-# Wrap it: collapse list/vector fields to a single string, then delegate
 patched <- function(field) {
   if (length(field) > 1L)
     field <- paste(unlist(field), collapse = ', ')
@@ -145,6 +159,9 @@ renv::restore(
   prompt   = FALSE
 )
 "@
+
+  Write-Host "Running renv::restore() - this will take a while ..."
+  & $destRscript --no-save --no-restore $restoreScript 2>&1 | Write-Host
 
   Write-Host ""
   $pkgCount = (Get-ChildItem -Directory -Path $lib).Count
