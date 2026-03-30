@@ -117,7 +117,10 @@ try {
   # Patch the lockfile copy to use a standard CRAN mirror so renv can
   # find Windows binary packages at the correct URL.
   $lockfileCopy = Join-Path $tmp "renv.lock"
-  (Get-Content $lockfile -Raw) -replace 'https://packagemanager\.posit\.co/cran/latest', 'https://cloud.r-project.org' | Set-Content $lockfileCopy
+  (Get-Content $lockfile -Raw) `
+    -replace 'https://packagemanager\.posit\.co/cran/latest', 'https://cloud.r-project.org' `
+    -replace '"Repository":\s*"RSPM"', '"Repository": "CRAN"' |
+    Set-Content $lockfileCopy
 
   # Use forward slashes in paths for R compatibility
   $lockfileR = $lockfileCopy -replace '\\', '/'
