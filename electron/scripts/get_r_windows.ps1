@@ -113,30 +113,21 @@ try {
   Write-Host "Installing BiocManager ..."
   & $destRscript -e "install.packages('BiocManager', repos = 'https://cloud.r-project.org', quiet = TRUE)" 2>&1 | Write-Host
 
-  # Restore all packages from lockfile into the staged library
+  # Posit Package Manager (in renv.lock) only serves Linux binaries.
+  # Patch the lockfile copy to use a standard CRAN mirror so renv can
+  # find Windows binary packages at the correct URL.
+  $lockfileCopy = Join-Path $tmp "renv.lock"
+  (Get-Content $lockfile -Raw) -replace 'https://packagemanager\.posit\.co/cran/latest', 'https://cloud.r-project.org' | Set-Content $lockfileCopy
+
   # Use forward slashes in paths for R compatibility
-  $lockfileR = $lockfile -replace '\\', '/'
+  $lockfileR = $lockfileCopy -replace '\\', '/'
   $libR = $lib -replace '\\', '/'
 
-  # renv 1.2.0 bug (rstudio/renv#2249): when DESCRIPTION fetch fails for
-  # non-repository packages (URL, GitHub), renv copies lockfile fields
-  # (JSON arrays) into desc as-is.  renv_description_parse_field() then
-  # crashes on is.na(vector).  We patch it to collapse vectors to strings
-  # before the original logic runs.  The return type (data_frame) is unchanged.
   # Write R restore script to a temp file (PowerShell here-strings passed
   # via -e don't work reliably with Rscript on Windows)
   $restoreScript = Join-Path $tmp "renv_restore.R"
   Set-Content -Path $restoreScript -Value @"
 options(warn = 1)
-
-# Posit Package Manager (in renv.lock) only serves Linux binaries.
-# Override renv's lockfile repos with mirrors that serve Windows binaries.
-options(renv.config.repos.override = c(
-  CRAN    = 'https://cloud.r-project.org',
-  BioCsoft = 'https://bioconductor.org/packages/3.21/bioc',
-  BioCann  = 'https://bioconductor.org/packages/3.21/data/annotation',
-  BioCexp  = 'https://bioconductor.org/packages/3.21/data/experiment'
-))
 
 # renv 1.2.0 bug (rstudio/renv#2249): when DESCRIPTION fetch fails for
 # non-repository packages (URL, GitHub), renv copies lockfile fields

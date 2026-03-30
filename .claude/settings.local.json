@@ -16,7 +16,8 @@
       "Bash(RDEST=\"/home/daniel/Documents/GitHub/idepGolem/electron/scripts/r-linux/R\")",
       "Bash(export R_HOME=\"$RDEST\")",
       "Bash(strace -f -e trace=execve \"$RDEST/bin/Rscript\" -e 'cat\\(\"\"\"\"hi\\\\n\"\"\"\"\\)')",
-      "Bash(gh api:*)"
+      "Bash(gh api:*)",
+      "WebFetch(domain:packagemanager.posit.co)"
     ],
     "deny": [],
     "ask": []
