@@ -136,67 +136,18 @@ jobs:
           if (!(Test-Path $rscript)) { throw "Bundled Rscript.exe not found at $rscript" }
           if (!(Test-Path $lib))     { New-Item -ItemType Directory -Force -Path $lib | Out-Null }
 
-      - name: Install ottoPlots into bundled lib
+      - name: Install R packages via PPM snapshot
         shell: pwsh
         env:
-          GITHUB_PAT: ${{ secrets.GITHUB_TOKEN }}   # or your PAT if needed
+          GITHUB_PAT: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          $app  = Join-Path $pwd "${{ env.PACKAGE_DIR }}"
-          $lib  = (Join-Path $app "runtime\R.win\library") -replace '\\','/'
-          $R    = Join-Path $app "runtime\R.win\bin\Rscript.exe"
-
-          & $R -e "if(!requireNamespace('remotes', quietly=TRUE)) install.packages('remotes', lib='$lib', repos='https://cran.r-project.org')"
-          & $R -e "remotes::install_github('espors/ottoPlots', lib='$lib', dependencies=TRUE, upgrade='never')"
-                      
-      # Install DESCRIPTION deps into bundled lib (CRAN + BioC, special-case ggalt)
-      - name: Install DESCRIPTION deps into bundled library
-        shell: pwsh
-        run: |
-          $app     = "${{ env.PACKAGE_DIR }}"
-          $lib     = Join-Path $app "runtime\R.win\library"
-          $rscript = Join-Path $app "runtime\R.win\bin\Rscript.exe"
-          $desc    = Join-Path $env:PKG_SRC "DESCRIPTION"
-          $libR  = $lib  -replace '\\','/'
-          $descR = $desc -replace '\\','/'
-          $r = @"
-            args <- commandArgs(trailingOnly=TRUE)
-            desc <- args[1]; lib <- args[2]
-            if (!dir.exists(lib)) dir.create(lib, recursive = TRUE, showWarnings = FALSE)
-            .libPaths(c(lib, .libPaths()))
-            opt_repos <- c(CRAN='https://cran.r-project.org')
-            options(repos = opt_repos, Ncpus = max(1L, parallel::detectCores()-1L))
-            if (!requireNamespace('BiocManager', quietly=TRUE))
-              install.packages('BiocManager', repos=opt_repos['CRAN'], lib=lib)
-            if (!requireNamespace('remotes', quietly=TRUE))
-              install.packages('remotes',     repos=opt_repos['CRAN'], lib=lib)
-            d <- read.dcf(desc)
-            parse <- function(field) {
-              if (!field %in% colnames(d)) return(character())
-              x <- gsub('\\n', ' ', d[1, field])
-              x <- unlist(strsplit(x, ','))
-              x <- gsub('\\s*\\(.*?\\)\\s*', '', x)
-              trimws(x)
-            }
-            pkgs <- unique(c(parse('Depends'), parse('Imports')))
-            pkgs <- setdiff(pkgs, c('R','base'))
-            want_ggalt <- 'ggalt' %in% pkgs
-            pkgs <- setdiff(pkgs, 'ggalt')
-            bioc <- intersect(pkgs, c('DESeq2','edgeR','ComplexHeatmap','GSVA','gage',
-                                      'hgu133plus2.db','InteractiveComplexHeatmap',
-                                      'PCAtools','pathview','QUBIC','fgsea'))
-            cran <- setdiff(pkgs, bioc)
-            if (length(cran)) install.packages(cran, lib=lib, dependencies=TRUE)
-            if (length(bioc)) BiocManager::install(bioc, lib=lib, ask=FALSE, update=FALSE)            
-            if (want_ggalt && !('ggalt' %in% rownames(installed.packages(lib.loc=lib)))) {
-              remotes::install_version('ggalt', version='0.4.0',
-                                      lib=lib, upgrade='never', dependencies=TRUE)
-            }
-            ip <- installed.packages(lib.loc = lib)
-            cat('Installed packages in bundled lib:', nrow(ip), '\n')
-            cat('ggalt present:', 'ggalt' %in% rownames(ip), '\n')
-          "@
-          Set-Content -Path install_desc.R -Value $r -Encoding UTF8
-          & $rscript install_desc.R $descR $libR
+          $rscript = Join-Path "${{ env.PACKAGE_DIR }}" "runtime\R.win\bin\Rscript.exe"
+          $lib = (Join-Path "${{ env.PACKAGE_DIR }}" "runtime\R.win\library") -replace '\\','/'
+          $savedPref = $ErrorActionPreference
+          $ErrorActionPreference = "Continue"
+          & $rscript --no-save --no-restore electron/scripts/install_packages.R $lib
+          $ErrorActionPreference = $savedPref
+          if ($LASTEXITCODE -ne 0) { throw "install_packages.R failed with exit code $LASTEXITCODE" }
 
       - name: Build and install idepGolem into R.win/library
         shell: pwsh

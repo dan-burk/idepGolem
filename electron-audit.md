@@ -149,7 +149,18 @@ list, all 18 `org.*.db` annotation databases, archived packages with no special 
 and fix strategies.
 
 **Verdict:** _TBD_
-**Changes:** Make a renv.lock file that's stable for R 4.5.1 and then replace the ~50+ lines of install code per (mac, linux, windows) workflow with renv::restore(library = lib). Making sure we add library argument to point to custom install pacth for Electron.
+**Changes:** Attempted renv.lock approach first — failed due to renv 1.2.0 bugs (see
+`renv-bug-report.md`). Replaced with Posit Package Manager (PPM) date-based snapshots.
+Linux and Windows now use a single shared `electron/scripts/install_packages.R` that
+installs all packages from PPM snapshots (CRAN: 2026-03-31, Bioconductor: 2025-10-17).
+This eliminated ~150 lines of hardcoded install logic from each workflow.
+**Mac workflow is still on the old approach** — uses its own inline install logic with a
+shorter/different package list. Mac excludes packages that Linux/Windows now install (see
+items #15, #14). Mac workflow left untouched intentionally for comparison before migration.
+**Ask original developer:** Mac is also missing `ReactomePA`, `runibic`, and 3 archived
+packages (`biclust`, `PGSEA`, `KEGG.db`) that have no install logic at all. Were the
+features using these packages tested on Mac, or were they dropped because they failed to
+build? The archived packages silently fail — they wouldn't produce a build error.
 
 ---
 

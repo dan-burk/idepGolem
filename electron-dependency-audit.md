@@ -114,7 +114,38 @@ if (!"KEGG.db" %in% rownames(installed.packages(lib.loc=lib))) {
 }
 ```
 
-## Suggested fix strategy
+## Current fix status (2026-03-31)
+
+### Linux & Windows: FIXED — PPM snapshot approach
+
+Options A–C below are **superseded** for Linux and Windows. Both now use a single shared
+script (`electron/scripts/install_packages.R`) that:
+- Uses Posit Package Manager date-based snapshots (CRAN: 2026-03-31, Bioc: 2025-10-17)
+- Installs ALL packages from DESCRIPTION via `BiocManager::install()` (handles both
+  CRAN and Bioconductor transparently — no hardcoded split)
+- Handles archived packages (biclust, ggalt, PGSEA, KEGG.db) from their archive URLs
+- Handles ottoPlots from GitHub
+- Includes all 18 `org.*.db` annotation databases
+- Works cross-platform from the same script (auto-detects Linux for PPM binary URLs)
+
+This eliminated ~150 lines of fragile install logic from each workflow and resolved
+all the gaps documented above.
+
+### macOS: STILL USES OLD APPROACH
+
+The Mac workflow (`build-electron-mac.yml`) was intentionally left untouched for
+comparison. It still has the old issues:
+- Hardcoded Bioc list (missing packages relative to `install_packages.R`)
+- Patches DESCRIPTION to remove `ggalt` from Imports before building
+- Does NOT install all 18 `org.*.db` annotation databases
+- Its own inline install logic (~60 lines) that can drift from DESCRIPTION
+
+**Plan:** Migrate Mac to `install_packages.R` after validating the approach on
+Linux/Windows and discussing with the Mac workflow author.
+
+---
+
+## Original fix options (for reference)
 
 ### Option A: Update workflows to match DESCRIPTION (minimal)
 

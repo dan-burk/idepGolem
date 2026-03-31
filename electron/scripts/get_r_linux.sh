@@ -99,29 +99,9 @@ sudo apt-get install -y --no-install-recommends \
 
 # ==================== Install R Packages ====================
 echo ""
-echo "==================== Installing R packages via renv ===================="
-
-PROJ_ROOT="${SCRIPT_DIR}/../.."
-LOCKFILE="${PROJ_ROOT}/renv.lock"
-if [[ ! -f "${LOCKFILE}" ]]; then
-  echo "ERROR: renv.lock not found at ${LOCKFILE}" >&2
-  exit 1
-fi
-LOCKFILE="$(cd "$(dirname "${LOCKFILE}")" && pwd)/$(basename "${LOCKFILE}")"
+echo "==================== Installing R packages via PPM snapshot ===================="
 
 LIB="${RDEST}/library"
-
-echo "Lockfile : ${LOCKFILE}"
-echo "Library  : ${LIB}"
-echo ""
-
-# Install renv into the staged R
-echo "Installing renv ..."
-${RSCRIPT} -e 'install.packages("renv", repos = "https://cloud.r-project.org", quiet = TRUE)'
-
-# Install BiocManager (renv needs it to resolve Bioconductor packages)
-echo "Installing BiocManager ..."
-${RSCRIPT} -e 'install.packages("BiocManager", repos = "https://cloud.r-project.org", quiet = TRUE)'
 
 # Ubuntu puts HDF5 headers in /usr/include/hdf5/serial/ instead of the
 # standard /usr/include/.  rhdf5filters needs this to find H5PLextern.h.
@@ -129,35 +109,9 @@ export C_INCLUDE_PATH="/usr/include/hdf5/serial${C_INCLUDE_PATH:+:$C_INCLUDE_PAT
 export CPATH="/usr/include/hdf5/serial${CPATH:+:$CPATH}"
 export LIBRARY_PATH="/usr/lib/x86_64-linux-gnu/hdf5/serial${LIBRARY_PATH:+:$LIBRARY_PATH}"
 
-# renv 1.2.0 bug (rstudio/renv#2249): when DESCRIPTION fetch fails for
-# non-repository packages (URL, GitHub), renv copies lockfile fields
-# (JSON arrays) into desc as-is.  renv_description_parse_field() then
-# crashes on is.na(vector).  We patch it to collapse vectors to strings
-# before the original logic runs.  The return type (data_frame) is unchanged.
-echo "Running renv::restore() — this will take a while ..."
-${RSCRIPT} -e "
-  options(warn = 1)
-
-  # Grab the original function from the renv namespace
-  orig <- get('renv_description_parse_field', envir = asNamespace('renv'))
-
-  # Wrap it: collapse list/vector fields to a single string, then delegate
-  patched <- function(field) {
-    if (length(field) > 1L)
-      field <- paste(unlist(field), collapse = ', ')
-    orig(field)
-  }
-  environment(patched) <- environment(orig)
-  utils::assignInNamespace('renv_description_parse_field', patched, ns = 'renv')
-
-  renv::restore(
-    lockfile = '${LOCKFILE}',
-    library  = '${LIB}',
-    prompt   = FALSE
-  )
-"
-
+echo "Library  : ${LIB}"
 echo ""
-echo "Installed packages:"
-${RSCRIPT} -e "cat(length(list.dirs('${LIB}', recursive = FALSE)), 'packages in', '${LIB}', '\n')"
+
+${RSCRIPT} --no-save --no-restore "${SCRIPT_DIR}/install_packages.R" "${LIB}"
+
 echo "✅ R packages installed"

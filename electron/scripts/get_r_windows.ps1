@@ -93,69 +93,24 @@ try {
 
   # ==================== Install R Packages ====================
   Write-Host ""
-  Write-Host "==================== Installing R packages via renv ===================="
-
-  $projRoot = Resolve-Path (Join-Path $PSScriptRoot "..\..") | Select-Object -ExpandProperty Path
-  $lockfile = Join-Path $projRoot "renv.lock"
-  if (-not (Test-Path $lockfile)) { throw "renv.lock not found at $lockfile" }
+  Write-Host "==================== Installing R packages via PPM snapshot ===================="
 
   $lib = Join-Path $destR "library"
+  # Use forward slashes in paths for R compatibility
+  $libR = $lib -replace '\\', '/'
 
-  Write-Host "Lockfile : $lockfile"
+  $installScript = Join-Path $PSScriptRoot "install_packages.R"
   Write-Host "Library  : $lib"
   Write-Host ""
 
-  # Install renv into the staged R
-  Write-Host "Installing renv ..."
-  & $destRscript -e "install.packages('renv', repos = 'https://cloud.r-project.org', quiet = TRUE)" 2>&1 | Write-Host
-
-  # Install BiocManager (renv needs it to resolve Bioconductor packages)
-  Write-Host "Installing BiocManager ..."
-  & $destRscript -e "install.packages('BiocManager', repos = 'https://cloud.r-project.org', quiet = TRUE)" 2>&1 | Write-Host
-
-  # Posit Package Manager (in renv.lock) only serves Linux binaries.
-  # Patch the lockfile copy to use a standard CRAN mirror so renv can
-  # find Windows binary packages at the correct URL.
-  $lockfileCopy = Join-Path $tmp "renv.lock"
-  (Get-Content $lockfile -Raw) `
-    -replace 'https://packagemanager\.posit\.co/cran/latest', 'https://cloud.r-project.org' `
-    -replace '"Repository":\s*"RSPM"', '"Repository": "CRAN"' |
-    Set-Content $lockfileCopy
-
-  # Use forward slashes in paths for R compatibility
-  $lockfileR = $lockfileCopy -replace '\\', '/'
-  $libR = $lib -replace '\\', '/'
-
-  # Write R restore script to a temp file (PowerShell here-strings passed
-  # via -e don't work reliably with Rscript on Windows)
-  $restoreScript = Join-Path $tmp "renv_restore.R"
-  Set-Content -Path $restoreScript -Value @"
-options(warn = 1)
-
-# renv 1.2.0 bug (rstudio/renv#2249): when DESCRIPTION fetch fails for
-# non-repository packages (URL, GitHub), renv copies lockfile fields
-# (JSON arrays) into desc as-is.  renv_description_parse_field() then
-# crashes on is.na(vector).  We patch it to collapse vectors to strings
-# before the original logic runs.  The return type (data_frame) is unchanged.
-orig <- get('renv_description_parse_field', envir = asNamespace('renv'))
-
-patched <- function(field) {
-  if (length(field) > 1L)
-    field <- paste(unlist(field), collapse = ', ')
-  orig(field)
-}
-environment(patched) <- environment(orig)
-utils::assignInNamespace('renv_description_parse_field', patched, ns = 'renv')
-
-renv::restore(
-  lockfile = '$lockfileR',
-  library  = '$libR',
-  prompt   = FALSE
-)
-"@
-
-  Write-Host "Running renv::restore() - this will take a while ..."
-  & $destRscript --no-save --no-restore $restoreScript 2>&1 | Write-Host
+  Write-Host "Running install_packages.R - this will take a while ..."
+  # Temporarily allow stderr (R/BiocManager print warnings there) so
+  # PowerShell doesn't treat them as fatal errors.
+  $savedPref = $ErrorActionPreference
+  $ErrorActionPreference = "Continue"
+  & $destRscript --no-save --no-restore $installScript $libR 2>&1 | Write-Host
+  $ErrorActionPreference = $savedPref
+  if ($LASTEXITCODE -ne 0) { throw "install_packages.R failed with exit code $LASTEXITCODE" }
 
   Write-Host ""
   $pkgCount = (Get-ChildItem -Directory -Path $lib).Count
