@@ -76,12 +76,16 @@ packages <- c(
   "shiny", "shinyAce", "shinyBS", "shinybusy", "shinyjs", "stringr",
   "tidyr", "tidyselect", "tidytext", "tippy", "visNetwork", "WGCNA",
   "wordcloud2",
+  # Dependencies of archived packages (not auto-resolved with repos=NULL)
+  "flexclust", "additivityTests",       # biclust deps
+  "proj4", "ash", "maps", "extrafont",  # ggalt deps
   # Bioconductor
   "Biobase", "BiocGenerics", "ComplexHeatmap", "DESeq2", "edgeR",
   "fgsea", "gage", "GenomicRanges", "GO.db", "GSVA",
   "hgu133plus2.db", "InteractiveComplexHeatmap", "IRanges", "KEGGREST",
-  "limma", "pathview", "PCAtools", "preprocessCore", "QUBIC",
-  "ReactomePA", "runibic", "S4Vectors", "SummarizedExperiment",
+  "limma", "pathview", "PCAtools", "preprocessCore",
+  "ReactomePA", "S4Vectors", "SummarizedExperiment",
+  "annaffy",                             # PGSEA dep
   # Organism annotation databases
   "org.Ag.eg.db", "org.At.tair.db", "org.Bt.eg.db", "org.Ce.eg.db",
   "org.Cf.eg.db", "org.Dm.eg.db", "org.Dr.eg.db", "org.EcK12.eg.db",
@@ -98,9 +102,10 @@ BiocManager::install(packages, lib = lib, update = FALSE, ask = FALSE)
 # These are no longer on CRAN/Bioconductor and must be installed from
 # their archive URLs. Matches the Remotes: field in DESCRIPTION.
 archived <- c(
-  PGSEA   = "https://bioconductor.org/packages/3.10/bioc/src/contrib/PGSEA_1.60.0.tar.gz",
+  # Order matters: KEGG.db must come before PGSEA, biclust before QUBIC/runibic
   KEGG.db = "http://www.bioconductor.org/packages//2.11/data/annotation/src/contrib/KEGG.db_2.8.0.tar.gz",
   biclust = "https://cran.r-project.org/src/contrib/Archive/biclust/biclust_2.0.3.1.tar.gz",
+  PGSEA   = "https://bioconductor.org/packages/3.10/bioc/src/contrib/PGSEA_1.60.0.tar.gz",
   ggalt   = "https://cran.r-project.org/src/contrib/Archive/ggalt/ggalt_0.4.0.tar.gz"
 )
 
@@ -108,6 +113,11 @@ for (pkg in names(archived)) {
   cat("\nInstalling archived package:", pkg, "\n")
   install.packages(archived[[pkg]], lib = lib, repos = NULL, type = "source")
 }
+
+# Bioconductor packages that depend on archived packages (biclust)
+# Must be installed after biclust is available.
+cat("\nInstalling Bioc packages that depend on archived biclust ...\n")
+BiocManager::install(c("QUBIC", "runibic"), lib = lib, update = FALSE, ask = FALSE)
 
 # GitHub packages
 cat("\nInstalling ottoPlots from GitHub ...\n")
