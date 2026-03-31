@@ -48,6 +48,7 @@ options(
   repos = c(CRAN = cran_url),
   BioC_mirror = bioc_url,
   BIOCONDUCTOR_CONFIG_FILE = paste0(bioc_url, "/config.yaml"),
+  timeout = 300,
   warn = 1
 )
 Sys.setenv("R_BIOC_VERSION" = BIOC_VERSION)
