@@ -4,6 +4,9 @@
 #
 # Usage:  Rscript install_packages.R [library_path]
 #   library_path  -- where to install packages (defaults to R's default .libPaths()[1])
+#
+# Reads dependencies directly from the DESCRIPTION file (including Remotes:
+# for archived/GitHub packages), so there is no manual package list to maintain.
 
 # ==================== Configuration ====================
 # CRAN and Bioconductor have separate snapshot calendars on PPM.
@@ -23,6 +26,28 @@ if (length(args) >= 1 && nzchar(args[1])) {
 } else {
   lib <- .libPaths()[1]
   cat("Installing to default library:", lib, "\n")
+}
+
+# ==================== Locate repo root (DESCRIPTION) ====================
+# This script lives at <repo>/electron/scripts/install_packages.R.
+# Derive the repo root so devtools::install_deps() can read DESCRIPTION.
+get_repo_root <- function() {
+  cmd_args <- commandArgs(trailingOnly = FALSE)
+  file_arg <- grep("--file=", cmd_args, value = TRUE)
+  if (length(file_arg) > 0) {
+    script_dir <- dirname(normalizePath(sub("--file=", "", file_arg[1])))
+    return(normalizePath(file.path(script_dir, "..", "..")))
+  }
+  # Fallback: assume working directory is the repo root
+  getwd()
+}
+
+repo_root <- get_repo_root()
+cat("Repo root :", repo_root, "\n")
+
+if (!file.exists(file.path(repo_root, "DESCRIPTION"))) {
+  stop("Cannot find DESCRIPTION at ", repo_root,
+       ". Run this script from the repo root or via Rscript electron/scripts/install_packages.R")
 }
 
 # ==================== Set up PPM repos ====================
@@ -57,72 +82,20 @@ cat("CRAN repo :", cran_url, "\n")
 cat("BioC mirror:", bioc_url, "\n")
 cat("BioC version:", BIOC_VERSION, "\n\n")
 
-# ==================== Install BiocManager ====================
+# ==================== Install bootstrapping packages ====================
 if (!requireNamespace("BiocManager", quietly = TRUE)) {
   install.packages("BiocManager", lib = lib)
 }
-
-# ==================== Package list ====================
-# Everything from DESCRIPTION Imports, excluding base R (stats, utils,
-# graphics, grDevices, grid) and the 5 archived/GitHub packages handled below.
-# BiocManager::install() resolves both CRAN and Bioconductor transparently.
-packages <- c(
-  # CRAN
-  "bslib", "circlize", "colorspace", "config", "data.table", "DBI",
-  "dendextend", "dplyr", "DT", "dynamicTreeCut", "e1071", "factoextra",
-  "flashClust", "GetoptLong", "ggplot2", "ggpubr", "ggraph", "ggrepel",
-  "ggupset", "golem", "hexbin", "igraph", "kableExtra", "knitr",
-  "pkgload", "plotly", "png", "purrr", "R.utils", "RColorBrewer",
-  "readxl", "remotes", "reshape2", "rmarkdown", "RSQLite", "Rtsne",
-  "shiny", "shinyAce", "shinyBS", "shinybusy", "shinyjs", "stringr",
-  "tidyr", "tidyselect", "tidytext", "tippy", "visNetwork", "WGCNA",
-  "wordcloud2",
-  # Dependencies of archived packages (not auto-resolved with repos=NULL)
-  "flexclust", "additivityTests",       # biclust deps
-  "proj4", "ash", "maps", "extrafont",  # ggalt deps
-  # Bioconductor
-  "Biobase", "BiocGenerics", "ComplexHeatmap", "DESeq2", "edgeR",
-  "fgsea", "gage", "GenomicRanges", "GO.db", "GSVA",
-  "hgu133plus2.db", "InteractiveComplexHeatmap", "IRanges", "KEGGREST",
-  "limma", "pathview", "PCAtools", "preprocessCore",
-  "ReactomePA", "S4Vectors", "SummarizedExperiment",
-  "annaffy",                             # PGSEA dep
-  # Organism annotation databases
-  "org.Ag.eg.db", "org.At.tair.db", "org.Bt.eg.db", "org.Ce.eg.db",
-  "org.Cf.eg.db", "org.Dm.eg.db", "org.Dr.eg.db", "org.EcK12.eg.db",
-  "org.EcSakai.eg.db", "org.Gg.eg.db", "org.Hs.eg.db", "org.Mm.eg.db",
-  "org.Mmu.eg.db", "org.Pt.eg.db", "org.Rn.eg.db", "org.Sc.sgd.db",
-  "org.Ss.eg.db", "org.Xl.eg.db"
-)
-
-cat("Installing", length(packages), "packages (CRAN:", CRAN_SNAPSHOT_DATE,
-    "/ BioC:", BIOC_SNAPSHOT_DATE, ")\n\n")
-BiocManager::install(packages, lib = lib, update = FALSE, ask = FALSE)
-
-# ==================== Archived / GitHub packages ====================
-# These are no longer on CRAN/Bioconductor and must be installed from
-# their archive URLs. Matches the Remotes: field in DESCRIPTION.
-archived <- c(
-  # Order matters: KEGG.db must come before PGSEA, biclust before QUBIC/runibic
-  KEGG.db = "http://www.bioconductor.org/packages//2.11/data/annotation/src/contrib/KEGG.db_2.8.0.tar.gz",
-  biclust = "https://cran.r-project.org/src/contrib/Archive/biclust/biclust_2.0.3.1.tar.gz",
-  PGSEA   = "https://bioconductor.org/packages/3.10/bioc/src/contrib/PGSEA_1.60.0.tar.gz",
-  ggalt   = "https://cran.r-project.org/src/contrib/Archive/ggalt/ggalt_0.4.0.tar.gz"
-)
-
-for (pkg in names(archived)) {
-  cat("\nInstalling archived package:", pkg, "\n")
-  install.packages(archived[[pkg]], lib = lib, repos = NULL, type = "source")
+if (!requireNamespace("devtools", quietly = TRUE)) {
+  install.packages("devtools", lib = lib)
 }
 
-# Bioconductor packages that depend on archived packages (biclust)
-# Must be installed after biclust is available.
-cat("\nInstalling Bioc packages that depend on archived biclust ...\n")
-BiocManager::install(c("QUBIC", "runibic"), lib = lib, update = FALSE, ask = FALSE)
-
-# GitHub packages
-cat("\nInstalling ottoPlots from GitHub ...\n")
-remotes::install_github("espors/ottoPlots", lib = lib, upgrade = "never")
+# ==================== Install all dependencies from DESCRIPTION ====================
+# devtools::install_deps() reads Imports, Depends, and Remotes from DESCRIPTION.
+# Remotes: handles archived/GitHub packages (KEGG.db, biclust, PGSEA, ggalt, ottoPlots).
+# Dependency ordering (e.g. biclust before QUBIC) is resolved automatically.
+cat("Installing all dependencies from DESCRIPTION ...\n\n")
+devtools::install_deps(repo_root, dependencies = TRUE, lib = lib, upgrade = "never")
 
 # ==================== Summary ====================
 installed <- list.dirs(lib, recursive = FALSE, full.names = FALSE)
