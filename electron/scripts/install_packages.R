@@ -86,16 +86,16 @@ cat("BioC version:", BIOC_VERSION, "\n\n")
 if (!requireNamespace("BiocManager", quietly = TRUE)) {
   install.packages("BiocManager", lib = lib)
 }
-if (!requireNamespace("devtools", quietly = TRUE)) {
-  install.packages("devtools", lib = lib)
+if (!requireNamespace("pak", quietly = TRUE)) {
+  install.packages("pak", lib = lib)
 }
 
 # ==================== Install all dependencies from DESCRIPTION ====================
-# devtools::install_deps() reads Imports, Depends, and Remotes from DESCRIPTION.
+# pak::local_install_deps() reads Imports, Depends, and Remotes from DESCRIPTION.
 # Remotes: handles archived/GitHub packages (KEGG.db, biclust, PGSEA, ggalt, ottoPlots).
 # Dependency ordering (e.g. biclust before QUBIC) is resolved automatically.
 cat("Installing all dependencies from DESCRIPTION ...\n\n")
-devtools::install_deps(repo_root, dependencies = TRUE, lib = lib, upgrade = "never")
+pak::local_install_deps(root = repo_root, lib = lib, upgrade = FALSE, dependencies = TRUE)
 
 # ==================== Summary ====================
 installed <- list.dirs(lib, recursive = FALSE, full.names = FALSE)

@@ -112,6 +112,6 @@ export LIBRARY_PATH="/usr/lib/x86_64-linux-gnu/hdf5/serial${LIBRARY_PATH:+:$LIBR
 echo "Library  : ${LIB}"
 echo ""
 
-${RSCRIPT} --no-save --no-restore "${SCRIPT_DIR}/install_packages.R" "${LIB}"
+${RSCRIPT} --no-save --file="${SCRIPT_DIR}/install_packages.R" --args "${LIB}"
 
 echo "✅ R packages installed"
