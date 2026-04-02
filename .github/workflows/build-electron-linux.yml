@@ -7,6 +7,13 @@ on:
     branches:
       - master
       - main
+    paths:
+      - "electron/**"
+      - "R/**"
+      - "app.R"
+      - "DESCRIPTION"
+      - "package.json"
+      - ".github/workflows/build-electron-linux.yml"
 
 jobs:
   build:

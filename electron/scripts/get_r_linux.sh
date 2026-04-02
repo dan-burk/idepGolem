@@ -60,26 +60,10 @@ rm -rf "${RDEST}"
 mkdir -p "${OUTDIR}"
 cp -a "${RHOME}" "${RDEST}"
 
-# Fix hardcoded paths in the R wrapper script and config files.
-# The Posit deb hardcodes /opt/R/<ver>/lib/R as R_HOME. After extraction,
-# RDEST *is* that lib/R directory, so replace the full original R_HOME first,
-# then any remaining top-level /opt/R/<ver> references.
-sed -i "s|/opt/R/${VER}/lib/R|${RDEST}|g" "${RDEST}/bin/R"
-sed -i "s|/opt/R/${VER}|${RDEST}|g"       "${RDEST}/bin/R"
+# Fix hardcoded paths and replace Rscript ELF with a portable wrapper.
+bash "$(dirname "$0")/patch_r_linux.sh" "${RDEST}"
 
-# The Rscript ELF binary has a hardcoded R_HOME baked in at compile time and
-# ignores the R_HOME env var, so it cannot work after relocation.  Use the
-# shell wrapper (bin/R) instead — the sed above already patched its paths.
-RSCRIPT="${RDEST}/bin/R --no-echo --no-restore"
-
-# Replace the broken Rscript binary with a shell wrapper so that configure
-# scripts (e.g. rhdf5filters) that call Rscript also work.
-mv "${RDEST}/bin/Rscript" "${RDEST}/bin/Rscript.orig"
-cat > "${RDEST}/bin/Rscript" <<'WRAPPER'
-#!/bin/sh
-exec "$(dirname "$0")/R" --no-echo --no-restore "$@"
-WRAPPER
-chmod +x "${RDEST}/bin/Rscript"
+RSCRIPT="${RDEST}/bin/Rscript"
 
 echo "R version:"
 ${RSCRIPT} -e 'cat(R.version.string, "\n")'
