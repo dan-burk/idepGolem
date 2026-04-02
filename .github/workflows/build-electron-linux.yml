@@ -3,19 +3,10 @@ name: Build Linux (Electron + R.linux)
 on:
   workflow_dispatch:
 
-  # push:
-  #   branches:
-  #     - packaging1
-  #     - 'rel*'
-  #   tags:
-  #     - 'v*'
-  #   paths:
-  #     - "electron/**"
-  #     - "R/**"
-  #     - "app.R"
-  #     - "DESCRIPTION"
-  #     - "package.json"
-  #     - ".github/workflows/*.yml"
+  push:
+    branches:
+      - master
+      - main
 
 jobs:
   build:
@@ -120,23 +111,33 @@ jobs:
           set -euo pipefail
           sudo apt-get update
           sudo apt-get install -y \
+            build-essential \
+            cmake \
+            gfortran \
             libcurl4-openssl-dev \
             libssl-dev \
             libxml2-dev \
             libpng-dev \
             libjpeg-dev \
             libcairo2-dev \
-            libxt-dev \
             libfontconfig1-dev \
             libfreetype6-dev \
             libtiff5-dev \
             libharfbuzz-dev \
             libfribidi-dev \
+            libgit2-dev \
+            libsodium-dev \
+            libglpk-dev \
+            libmagick++-6.q16-dev \
+            libproj-dev \
+            libhdf5-dev \
+            libblosc-dev \
+            `# --- inherited from original workflow, may not be needed ---` \
+            libxt-dev \
             libglib2.0-dev \
             libudunits2-dev \
             libgdal-dev \
-            libgeos-dev \
-            libproj-dev
+            libgeos-dev
 
       # Stage a full R runtime into runtime/R.linux
       - name: Stage R.linux (mirror R.home into runtime/R.linux)
@@ -171,6 +172,11 @@ jobs:
       - name: Install R packages via PPM snapshot
         env:
           GITHUB_PAT: ${{ secrets.GITHUB_TOKEN }}
+          # Ubuntu puts HDF5 headers in /usr/include/hdf5/serial/ instead of
+          # the standard /usr/include/.  rhdf5filters needs these to compile.
+          C_INCLUDE_PATH: /usr/include/hdf5/serial
+          CPATH: /usr/include/hdf5/serial
+          LIBRARY_PATH: /usr/lib/x86_64-linux-gnu/hdf5/serial
         run: |
           set -euo pipefail
           rscript="$PACKAGE_DIR/runtime/R.linux/bin/Rscript"
