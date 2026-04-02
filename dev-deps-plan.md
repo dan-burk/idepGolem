@@ -247,6 +247,100 @@ Dev startup goes from ~1 hour (install all deps) to ~1 minute (pull cached image
 - Archived CRAN packages have no binaries anywhere — must install from source via URL
 - **Jammy vs Noble**: Rocker switched to Noble at R 4.4.2. Posit PM URLs fixed to `noble` in both Dockerfiles. CRAN binaries work correctly. Bioconductor binaries are NOT available from PPM (see Phase 1.5 findings).
 
+
+## ARM64 Windows (Electron Desktop Build)
+
+### Current state — x86_64 only
+
+The entire Windows Electron pipeline is hardcoded for x86_64. On ARM64 Windows 11, the x86_64 build runs via emulation but with a performance penalty. The following files contain x86_64 assumptions:
+
+| File | Line(s) | Issue |
+|---|---|---|
+| `electron/scripts/get_r_windows.ps1` | 34-38 | Download URLs fetch `R-$Rver-win.exe` (x86_64). ARM64 builds use `R-$Rver-aarch64-win.exe` |
+| `electron/scripts/get_r_windows.ps1` | 86 | Sanity check looks for `bin\x64\R.dll`. ARM64 R places it at `bin\aarch64\R.dll` |
+| `electron/main.js` | 58 | Fallback path `bin/x64/Rscript.exe`. ARM64 R uses `bin/aarch64/Rscript.exe`. (Primary candidate `bin/Rscript.exe` on line 57 works on both) |
+| `electron/package.json` | 49 | `"arch": ["x64"]` — Electron builder only targets x64 |
+| `.github/workflows/build-electron-windows.yml` | 113 | `rtools-version: '45'` installs x86_64 Rtools. ARM64 needs `rtools45-aarch64` |
+| `.github/workflows/build-electron-windows.yml` | 197 | `npx electron-builder --win --x64` — only builds x64 artifact |
+
+### CRAN ARM64 availability (verified 2026-03-25)
+
+- R 4.4.0+ has official Windows ARM64 installers on CRAN (`R-$Rver-aarch64-win.exe`)
+- Rtools45 has an aarch64 variant (`rtools45-aarch64.exe`) available from CRAN
+- CRAN serves prebuilt ARM64 Windows binaries for most packages
+
+### PPM ARM64 availability — UNKNOWN
+
+Posit Package Manager binary availability for Windows ARM64 has not been tested. If PPM does not serve ARM64 Windows binaries, packages would need to come from CRAN directly or compile from source with `rtools45-aarch64`.
+
+### Changes needed for native ARM64 support
+
+#### 1. `electron/scripts/get_r_windows.ps1` — architecture detection + installer URL
+
+Add architecture detection (similar to `get_r_mac.sh` lines 9-11):
+```powershell
+$arch = if ($env:PROCESSOR_ARCHITECTURE -eq "ARM64") { "aarch64" } else { "x64" }
+```
+
+Adjust download URLs based on `$arch`:
+- x64: `R-$Rver-win.exe` (current behavior)
+- aarch64: `R-$Rver-aarch64-win.exe`
+
+Update the DLL sanity check (line 86):
+```powershell
+$destRdll = Join-Path $destR "bin\$arch\R.dll"
+```
+
+#### 2. `electron/main.js` — add aarch64 candidate path
+
+```js
+const candidates = [
+  binDir && path.join(binDir, 'Rscript.exe'),
+  R_ROOT && path.join(R_ROOT, 'bin', 'x64', 'Rscript.exe'),
+  R_ROOT && path.join(R_ROOT, 'bin', 'aarch64', 'Rscript.exe'),
+].filter(Boolean);
+```
+
+#### 3. `electron/package.json` — add arm64 target
+
+```json
+"win": {
+  "target": [{ "target": "nsis", "arch": ["x64", "arm64"] }]
+}
+```
+
+This produces two installers: one x64, one arm64. Each must bundle the matching R runtime.
+
+#### 4. `.github/workflows/build-electron-windows.yml` — matrix build
+
+Add an architecture matrix so CI builds both x64 and arm64 artifacts:
+```yaml
+strategy:
+  matrix:
+    arch: [x64, arm64]
+steps:
+  - name: Setup R (with Rtools)
+    uses: r-lib/actions/setup-r@v2
+    with:
+      r-version: '4.5.1'
+      rtools-version: ${{ matrix.arch == 'arm64' && '45-aarch64' || '45' }}
+  # ...
+  - run: npx electron-builder --win --${{ matrix.arch }}
+```
+
+**Blocker**: GitHub Actions Windows runners are x86_64. ARM64 cross-compilation of R packages from source (those not available as binaries) may not work without an ARM64 runner or cross-toolchain. Packages that require source compilation (biclust, ggalt, PGSEA, KEGG.db) are the risk area.
+
+#### 5. `electron/scripts/install_packages.R` — repo URLs
+
+If PPM does not serve ARM64 Windows binaries, `install_packages.R` may need to prefer CRAN binary repos over PPM for ARM64, or fall back to source compilation with `rtools45-aarch64`.
+
+### Decision: when to implement
+
+ARM64 Windows is a growing user base (Surface Pro, Snapdragon X laptops) but not yet mainstream for bioinformatics. The x86_64 build runs fine under emulation. Recommend:
+- **Now**: add the `aarch64` candidate path to `main.js` (one-line, no-risk change)
+- **Later**: full ARM64 pipeline after Phase 3 base image is stable and PPM ARM64 support is verified
+
+
 ## Open Questions
 - Should `biocViews` packages live only in `Imports`? Duplication works but is messy
 - Consolidate with production Docker build in `iDEP-SDSU/idep`?

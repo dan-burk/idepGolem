@@ -171,10 +171,7 @@ jobs:
           #    time, impossible to relocate) with a shell wrapper that
           #    delegates to the already-patched bin/R.
           mv "${dst}/bin/Rscript" "${dst}/bin/Rscript.orig"
-          cat > "${dst}/bin/Rscript" <<'WRAPPER'
-          #!/bin/sh
-          exec "$(dirname "$0")/R" --no-echo --no-restore "$@"
-          WRAPPER
+          printf '#!/bin/sh\nexec "$(dirname "$0")/R" --no-echo --no-restore "$@"\n' > "${dst}/bin/Rscript"
           chmod +x "${dst}/bin/Rscript"
 
           echo "Patched bin/R and replaced bin/Rscript with shell wrapper"

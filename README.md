@@ -102,6 +102,17 @@ After stopping it, you can restart it by repeating Step 4, which also pulls the 
 
 Alternatively, you can also install iDEP as an R package or copy the iDEP code locally. The method is the same as above in the Windows section.
 
+### Linux: Desktop App (Ubuntu 24.04, x86_64)
+1. Download the `linux-dist.zip` file from the latest [release](https://github.com/gexijin/idepGolem/releases).
+2. Extract the `.zip` file to find the `idep-1.0.0-linux-amd64.deb` inside.
+3. Double-click the `.deb` file — this opens the installer.
+4. Launch iDEP from your application menu.
+
+To uninstall:
+```console
+sudo dpkg -r idepgolem
+```
+
 ### Linux: Docker container (~10 minutes)
 1. Install Docker Engine follow instructions [here](https://docs.docker.com/engine/install/). Many Linux systems have Docker installed by default. On Ubuntu, I used the following scripts.
 ```console
