@@ -154,6 +154,31 @@ jobs:
           echo "RHOME  = $RHOME"
           echo "R.linux = $dst"
 
+          # ── Fix hardcoded paths so R works after relocation ──
+          # The Posit deb bakes /opt/R/<ver>/lib/R into bin/R and the
+          # Rscript ELF binary.  After electron-builder packages the app
+          # the install path is entirely different, so we must patch.
+
+          # 1. Make R_HOME_DIR (and friends) self-referencing in bin/R
+          #    so they resolve correctly wherever the app is installed.
+          #    bin/R lives at <R_HOME>/bin/R, so dirname/.. = R_HOME.
+          sed -i 's|^R_HOME_DIR=.*|R_HOME_DIR="$(cd "$(dirname "$(readlink -f "$0")")/.." \&\& pwd)"|' "${dst}/bin/R"
+          sed -i 's|^R_SHARE_DIR=.*|R_SHARE_DIR=${R_HOME_DIR}/share|'     "${dst}/bin/R"
+          sed -i 's|^R_INCLUDE_DIR=.*|R_INCLUDE_DIR=${R_HOME_DIR}/include|' "${dst}/bin/R"
+          sed -i 's|^R_DOC_DIR=.*|R_DOC_DIR=${R_HOME_DIR}/doc|'           "${dst}/bin/R"
+
+          # 2. Replace the Rscript ELF binary (hardcoded R_HOME at compile
+          #    time, impossible to relocate) with a shell wrapper that
+          #    delegates to the already-patched bin/R.
+          mv "${dst}/bin/Rscript" "${dst}/bin/Rscript.orig"
+          cat > "${dst}/bin/Rscript" <<'WRAPPER'
+          #!/bin/sh
+          exec "$(dirname "$0")/R" --no-echo --no-restore "$@"
+          WRAPPER
+          chmod +x "${dst}/bin/Rscript"
+
+          echo "Patched bin/R and replaced bin/Rscript with shell wrapper"
+
       - name: Resolve bundled paths (debug)
         run: |
           set -euo pipefail
