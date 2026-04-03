@@ -469,6 +469,10 @@ quit(status = if (ok) 0L else 1L, save = "no")
 
   setSplashProgress(0.35, 'Writing R bootstrap script…');
 
+  // Remove stale port file from previous launch so we don't read an old port
+  const stalePortFile = path.join(DATA_PARENT, 'idep_port.txt');
+  try { fs.unlinkSync(stalePortFile); } catch (_) {}
+
   // spawn R
   try {
     childProc = spawn(rscript, ['--vanilla', bootstrapPath], {
