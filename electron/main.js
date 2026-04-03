@@ -470,7 +470,7 @@ quit(status = if (ok) 0L else 1L, save = "no")
 
   // spawn R
   try {
-    childProc = spawn(rscript, ['--vanilla', '--file=' + bootstrapPath], {
+    childProc = spawn(rscript, ['--vanilla', bootstrapPath], {
       cwd: DATA_PARENT,
       env: {
         ...process.env,
