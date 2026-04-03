@@ -62,3 +62,10 @@
 **Task:** Point CWD at a writable directory without modifying R source code.
 **Action:** Changed `setwd(app_dir)` to `setwd(data_dir)` in the bootstrap. `data_dir` is the writable user data directory that `main.js` already creates. Nothing in the R package requires CWD to be the app directory — Golem uses `app_sys()`, packages load via `.libPaths()`.
 **Result:** First-launch database download succeeds on all platforms. Zero R source changes — Electron fix stays in Electron.
+
+## 10. Stale Port File Causes Timeout on Relaunch
+
+**Situation:** R writes its port number to `idep_port.txt` during startup. On relaunch, `main.js` found the port file from the previous session immediately, read the old port, and committed to it before R had a chance to start and write the new port. If Shiny bound to a different port (because the old one was still in TIME_WAIT), `main.js` waited on the wrong port and timed out after 120 seconds.
+**Task:** Ensure `main.js` always connects to the port Shiny actually binds to.
+**Action:** Delete `idep_port.txt` before spawning R so the port file loop waits for R to write a fresh value.
+**Result:** Relaunch correctly detects the new port. No more timeout on second run.
