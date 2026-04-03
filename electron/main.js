@@ -372,11 +372,12 @@ try({
                             extras = NULL, verbose = getOption("verbose")) {
 
     is_demo_tar <- grepl("data113", basename(tarfile), fixed = TRUE)
+    target_dir <- file.path(exdir, "data113")
 
     if (is_demo_tar &&
-        dir.exists(exdir) &&
-        length(list.files(exdir, recursive = TRUE)) > 0L) {
-      message("[bootstrap] Skipping untar for demo data; existing files in: ", exdir)
+        dir.exists(target_dir) &&
+        length(list.files(target_dir, recursive = TRUE)) > 0L) {
+      message("[bootstrap] Skipping untar for demo data; existing files in: ", target_dir)
       return(invisible(character()))
     }
 
@@ -413,7 +414,7 @@ try({
 # inform Electron about port
 writeLines(as.character(port), file.path(data_dir, "idep_port.txt"))
 
-setwd(app_dir)
+setwd(data_dir)
 ok <- TRUE
 startup_t0 <- Sys.time()
 

@@ -1,118 +1,184 @@
-# Fix: Linux Electron Package Exit Code 1
+# Fix: Electron Exit Code 1 (Windows + Linux)
 
 ## Situation
 
-The Linux Electron build of iDEP crashes immediately on first launch with exit code 1. The app attempts to download the demo database (`data113.tar.gz`) because it is not bundled with the package, but the download fails with "Permission denied" and the app cannot connect to its SQLite database.
+The Electron build of iDEP crashes on launch with exit code 1. Two separate bugs cause this:
 
-The error log shows:
+**Bug 1 — "file name is missing" (Windows + Linux):**
+Commit `656501c` changed the Rscript spawn from a positional argument to `--file=` concatenation. If the bootstrap path has issues (spaces, empty value), Rscript prints "file name is missing" and exits with code 1.
 
-```
-[R stderr] [bootstrap] No existing demo data dir at: /opt/iDEP/resources/app/data113
-[R stderr] Warning in download.file(...): cannot open destfile 'data113.tar.gz', reason 'Permission denied'
-[R stdout] FATAL: Could not connect to database: unable to open database file
-[R exit] code=1
-```
+**Bug 2 — "Permission denied" on database download (Linux only):**
+The bootstrap script runs `setwd(app_dir)`, setting CWD to the read-only install directory (`/opt/iDEP/resources/app`). The R source code (`fct_database.R`, `run_app.R`) downloads and extracts the database relative to CWD. On a server this works because CWD is writable. On Linux Electron, CWD is read-only, so the download fails with "Permission denied."
 
-Three interacting issues cause this failure:
+**Bug 3 — Patched `untar` always skips extraction on first launch:**
+The bootstrap's monkey-patched `untar` checks if `exdir` (which defaults to CWD) contains any files. CWD always contains files, so extraction is always skipped — even on first launch when the database hasn't been extracted yet.
 
-1. **`R/fct_database.R`** downloads `data113.tar.gz` using a bare relative filename (`destfile = file_name`), which resolves to the current working directory.
-2. **`R/run_app.R`** falls back to `./data113` (CWD-relative) when the configured `IDEP_DATABASE` path does not yet contain the database, even though that environment variable points to a writable directory chosen by Electron.
-3. **`electron/main.js`** bootstrap sets `setwd(app_dir)` to `/opt/iDEP/resources/app` (a read-only installed location), so all CWD-relative writes fail with Permission denied.
+### Key insight
 
-A secondary hidden bug: the bootstrap's monkey-patched `untar` skips extraction if `exdir` contains *any* files. Since `exdir` defaults to CWD (which always has files), even if the download had succeeded, the data would never be extracted.
+The original `main.js` (created by Raghavi, Nov 2025) set `setwd(app_dir)` in the bootstrap. This was unnecessary — nothing in the R package requires CWD to be the app install directory. Golem resolves paths through `app_sys()` / `system.file()`, packages load via `.libPaths()`, and Shiny doesn't care about CWD. The `setwd` only served to make CWD read-only, breaking all CWD-relative writes.
+
+The R source code (`fct_database.R`, `run_app.R`) relies on CWD being writable for downloads and the fallback path. Rather than modifying the R source (which serves the deployed web app, Docker, and dev environments), the fix keeps all changes in the Electron layer (`main.js`) where the problem originates. This gives clean separation of concerns — Electron fixes stay in Electron, R source stays untouched.
 
 ## Task
 
-Fix the first-launch data download flow so that:
+Fix the Electron first-launch flow so that:
 
-- The database tarball downloads to a writable location on all platforms.
-- The untar extraction is not incorrectly skipped on first launch.
-- Non-Electron environments (dev, Docker, shinyapps.io) are unaffected.
+- Rscript receives the bootstrap path correctly (fixes Windows + Linux crash)
+- CWD is a writable directory so existing R download logic works (fixes Linux)
+- The patched `untar` correctly detects first launch vs. subsequent launches
+- Zero changes to R source code — non-Electron environments are completely unaffected
 
-## Action
+## Action — All changes in `electron/main.js` only
 
-### 1. `R/fct_database.R` (line 38-47) - Use absolute download path
+### 1. Revert Rscript spawn to positional argument (line ~473)
 
-**Before:** Download destination was the bare filename `data113.tar.gz`, resolved relative to CWD.
+**Before:** `spawn(rscript, ['--vanilla', '--file=' + bootstrapPath], { ... })`
 
-**After:** Compute `download_dir` as the parent of `DATAPATH` (which is always the writable data root), download there, and pass `exdir = download_dir` to `untar`.
+**After:** `spawn(rscript, ['--vanilla', bootstrapPath], { ... })`
 
+Rscript expects the script path as a positional argument. The `--file=` concatenation was introduced in commit `656501c` and broke both platforms.
+
+### 2. Change `setwd(app_dir)` to `setwd(data_dir)` (line ~417 in bootstrap)
+
+**Before:** `setwd(app_dir)` — sets CWD to the read-only install directory (e.g., `/opt/iDEP/resources/app`)
+
+**After:** `setwd(data_dir)` — sets CWD to the writable user data directory (e.g., `/home/user/idep`)
+
+This is the root cause fix. `data_dir` is the writable directory that `main.js` already creates and passes as `IDEP_DATABASE`. By making it CWD, all existing CWD-relative operations in the R source code (downloading, untarring, the `./data113` fallback) land in a writable location.
+
+Nothing in the R package requires CWD to be the app directory:
+- `getwd()` calls in `mod_02`, `mod_03`, `mod_04`, `mod_06` are for report `knit_root_dir` — they just need a writable directory
+- `fct_06_pathway.R` uses `getwd()` for a log message only
+- Package loading uses `.libPaths()`, not CWD
+- Golem uses `app_sys()`, not CWD
+
+### 3. Fix patched `untar` skip logic (line ~374-381 in bootstrap)
+
+**Before:** Checks if `exdir` (the parent directory, typically CWD) has any files:
 ```r
-# Before
-download.file(url = ..., destfile = file_name, ...)
-untar(file_name)
-file.remove(file_name)
-
-# After
-download_dir <- normalizePath(
-  dirname(sub("/$", "", datapath)), winslash = "/", mustWork = FALSE
-)
-dir.create(download_dir, recursive = TRUE, showWarnings = FALSE)
-dest_file <- file.path(download_dir, file_name)
-download.file(url = ..., destfile = dest_file, ...)
-untar(dest_file, exdir = download_dir)
-file.remove(dest_file)
+is_demo_tar <- grepl("data113", basename(tarfile), fixed = TRUE)
+if (is_demo_tar && dir.exists(exdir) && length(list.files(exdir, recursive = TRUE)) > 0L)
 ```
 
-**Why this is an R source change, not just an Electron fix:** The original code assumes CWD is writable, which fails on any read-only deployment (Electron, Docker with read-only root, etc.). Using an absolute path derived from the configured `datapath` is more robust in general.
-
-### 2. `R/run_app.R` (line 46-57) - Don't fall back to read-only CWD when IDEP_DATABASE is set
-
-**Before:** If `orgInfo.db` was not found at the `IDEP_DATABASE`-derived path (because data hasn't been downloaded yet), the code fell back to `file.path(".", db_ver)`, pointing `DATAPATH` at the read-only CWD.
-
-**After:** Only apply the CWD fallback when `IDEP_DATABASE` is not set (i.e., dev environments using relative paths). When `IDEP_DATABASE` is explicitly set, keep `DATAPATH` pointing at the writable location so the subsequent download writes there.
-
+**After:** Checks if the specific `data113/` subdirectory exists inside `exdir`:
 ```r
-# Before
-if (!file.exists(org_info_candidate)) {
-  fallback_path <- file.path(".", db_ver)
-  DATAPATH <<- ...
-}
-
-# After
-if (!file.exists(org_info_candidate)) {
-  if (nchar(Sys.getenv("IDEP_DATABASE")[1]) == 0) {
-    fallback_path <- file.path(".", db_ver)
-    DATAPATH <<- ...
-  }
-}
-```
-
-### 3. `electron/main.js` (line 374-381) - Fix patched untar skip logic
-
-**Before:** The monkey-patched `untar` checked if `exdir` (the extraction target directory) had any files at all. Since `exdir` is typically a parent directory containing bootstrap files, port files, etc., this always evaluated to true and skipped extraction on first launch.
-
-**After:** Check specifically for `file.path(exdir, "data113")` — the actual subdirectory the tarball creates. On first launch this directory doesn't exist, so extraction proceeds. On subsequent launches it exists with content, so extraction is correctly skipped.
-
-```r
-# Before
-if (is_demo_tar && dir.exists(exdir) && length(list.files(exdir, ...)) > 0L)
-
-# After
+is_demo_tar <- grepl("data113", basename(tarfile), fixed = TRUE)
 target_dir <- file.path(exdir, "data113")
-if (is_demo_tar && dir.exists(target_dir) && length(list.files(target_dir, ...)) > 0L)
+if (is_demo_tar && dir.exists(target_dir) && length(list.files(target_dir, recursive = TRUE)) > 0L)
 ```
 
-## Result
-
-**First launch flow with fixes:**
-
-1. Electron sets `IDEP_DATABASE=/home/daniel/idep` (writable), spawns R with `cwd=/home/daniel/idep`.
-2. Bootstrap runs `setwd("/opt/iDEP/resources/app")` for app file resolution.
-3. `run_app.R` sets `DATAPATH=/home/daniel/idep/data113/` from `IDEP_DATABASE`. Database doesn't exist yet, but `IDEP_DATABASE` is set so no CWD fallback occurs.
-4. `connect_convert_db()` sees `orgInfo.db` missing, triggers download.
-5. `download_dir` resolves to `/home/daniel/idep` (writable). Download succeeds.
-6. Patched `untar` checks `/home/daniel/idep/data113` (doesn't exist yet) and proceeds with extraction.
-7. `data113/` is created at `/home/daniel/idep/data113/`, database connects successfully.
-
-**Second launch:** `orgInfo.db` exists at `/home/daniel/idep/data113/demo/orgInfo.db`, no download triggered.
-
-**Non-Electron environments:** `IDEP_DATABASE` is unset, so the CWD fallback path is unchanged. No behavioral difference for dev, Docker, or shinyapps.io deployments.
+On first launch, `data113/` doesn't exist → extraction proceeds. On subsequent launches, `data113/` exists with content → extraction is correctly skipped.
 
 ### Files changed
 
 | File | Change |
 |---|---|
-| `R/fct_database.R` | Use absolute path for download and untar based on `datapath` |
-| `R/run_app.R` | Skip CWD fallback when `IDEP_DATABASE` env var is set |
+| `electron/main.js` | Revert Rscript spawn to positional argument |
+| `electron/main.js` | `setwd(app_dir)` → `setwd(data_dir)` |
 | `electron/main.js` | Patched `untar` checks `data113/` subdirectory, not parent dir |
+| `R/fct_database.R` | No changes |
+| `R/run_app.R` | No changes |
+
+---
+
+## Detailed Walkthrough: Before, Why It Broke, After, Why It Works
+
+### How it worked BEFORE Electron existed (deployed web app)
+
+The app runs on a server. `IDEP_DATABASE` is not set in the server's environment. The database sits at `./data113/` relative to where the app runs.
+
+1. **`run_app.R:26`** — `data_root = Sys.getenv("IDEP_DATABASE")` → returns empty string `""`
+2. **`run_app.R:28-29`** — `nchar("") == 0` is true → `data_root = "../../data"`
+3. **`run_app.R:40-43`** — `DATAPATH = "../../data/data113/"`
+4. **`run_app.R:44`** — Checks for `../../data/data113/demo/orgInfo.db` — doesn't exist on a fresh dev setup
+5. **`run_app.R:46-53`** — Fallback runs: `DATAPATH = "./data113/"`
+6. **`run_app.R:44`** — Checks for `./data113/demo/orgInfo.db` — if it exists, done. If not...
+7. **`fct_database.R:25`** — `org_info_file` doesn't exist → enters download block
+8. **`fct_database.R:38-47`** — Downloads `data113.tar.gz` to CWD (`.`), untars to CWD (`.`), creates `./data113/`
+9. **Works** because CWD is a normal writable server directory
+
+**This flow is completely unaffected by our changes. We touch zero R source files.**
+
+### Why it FAILED on Electron
+
+`main.js` spawns R and passes `IDEP_DATABASE=/home/user/idep` in the environment (a writable user directory). But the bootstrap script runs `setwd(app_dir)` — pointing CWD at the read-only install directory.
+
+#### Bug 1 — "file name is missing" (Windows + Linux):
+
+1. `main.js` spawns `Rscript --vanilla --file=/path/to/bootstrap.R`
+2. Rscript doesn't parse `--file=` correctly in this context → prints "file name is missing" → exit code 1
+3. App never starts
+
+#### Bug 2 — "Permission denied" (Linux, if Bug 1 were fixed):
+
+1. **`run_app.R:26`** — `data_root = Sys.getenv("IDEP_DATABASE")` → returns `"/home/user/idep"`
+2. **`run_app.R:28-29`** — `nchar("/home/user/idep") == 0` is false → skip, `data_root` stays `"/home/user/idep"`
+3. **`run_app.R:40-43`** — `DATAPATH = "/home/user/idep/data113/"`
+4. **`run_app.R:44`** — Checks for `/home/user/idep/data113/demo/orgInfo.db` — doesn't exist (first launch)
+5. **`run_app.R:46-53`** — Fallback runs: `DATAPATH = "./data113/"` — but `.` is `/opt/iDEP/resources/app/` (read-only!) because `setwd(app_dir)` made it so
+6. **`fct_database.R:25`** — `org_info_file` doesn't exist → enters download block
+7. **`fct_database.R:38-42`** — Tries to download `data113.tar.gz` to CWD → `/opt/iDEP/resources/app/`
+8. **Permission denied.** Read-only directory. App crashes, exit code 1.
+
+#### Bug 3 — Even if download succeeded, untar would be skipped:
+
+1. `untar("data113.tar.gz")` is called → patched `untar` intercepts
+2. `exdir` defaults to `"."` (CWD) which has files in it (bootstrap, port file, logs, etc.)
+3. `length(list.files(".", recursive = TRUE)) > 0L` → TRUE → **extraction skipped**
+4. Database never extracted even though tarball was downloaded
+
+### How it works NOW (all fixes in `main.js` only)
+
+#### Windows Electron:
+
+1. `main.js` spawns `Rscript --vanilla /path/to/bootstrap.R` (positional arg — **fix 1**)
+2. Bootstrap runs `setwd(data_dir)` → CWD = `C:\Users\dburk\AppData\Local\Programs\idepGolem\idep` (writable — **fix 2**)
+3. **`run_app.R:26`** — `data_root = Sys.getenv("IDEP_DATABASE")` → returns `C:\Users\dburk\...\idep`
+4. **`run_app.R:40-44`** — `DATAPATH = C:/.../idep/data113/`, checks for `orgInfo.db` — doesn't exist (first launch)
+5. **`run_app.R:46-53`** — Fallback runs: `DATAPATH = "./data113/"` → resolves to `C:\Users\dburk\...\idep\data113\` — **writable** because CWD is the writable data dir
+6. **`fct_database.R:25`** — `org_info_file` doesn't exist → enters download block
+7. **`fct_database.R:38-47`** — Downloads `data113.tar.gz` to CWD (writable), untars to CWD, creates `./data113/`
+8. Patched `untar` checks `file.path(".", "data113")` — doesn't exist yet → **extraction proceeds** (**fix 3**)
+9. **App starts.**
+
+#### Linux Electron, first launch:
+
+1. `main.js` spawns `Rscript --vanilla /path/to/bootstrap.R` (positional arg — **fix 1**)
+2. Bootstrap runs `setwd(data_dir)` → CWD = `/home/user/idep` (writable — **fix 2**)
+3. **`run_app.R:26`** — `data_root = Sys.getenv("IDEP_DATABASE")` → returns `"/home/user/idep"`
+4. **`run_app.R:28-29`** — `nchar("/home/user/idep") == 0` is false → skip, `data_root` stays `"/home/user/idep"`
+5. **`run_app.R:40-43`** — `DATAPATH = "/home/user/idep/data113/"`
+6. **`run_app.R:44`** — Checks for `/home/user/idep/data113/demo/orgInfo.db` — doesn't exist (first launch)
+7. **`run_app.R:46-53`** — Fallback runs: `DATAPATH = "./data113/"` → resolves to `/home/user/idep/data113/` — **writable** because CWD is the writable data dir
+8. **`fct_database.R:25`** — `org_info_file` doesn't exist → enters download block
+9. **`fct_database.R:38`** — `file_name = "data113.tar.gz"`
+10. **`fct_database.R:40-45`** — Downloads to CWD → `/home/user/idep/data113.tar.gz` — **succeeds**
+11. **`fct_database.R:46`** — `untar("data113.tar.gz")` → patched `untar` intercepts
+12. Patched `untar` checks `file.path(".", "data113")` → `/home/user/idep/data113` — doesn't exist yet → **extraction proceeds** (**fix 3**)
+13. Creates `/home/user/idep/data113/` with all database files
+14. **`fct_database.R:47`** — Deletes `data113.tar.gz`
+15. **`fct_database.R:55-59`** — Connects to `/home/user/idep/data113/demo/orgInfo.db` — **app starts**
+
+#### Second launch (any platform):
+
+1. Bootstrap runs, `setwd(data_dir)`
+2. `run_app.R` resolves `DATAPATH`, finds `orgInfo.db` exists → no fallback needed
+3. `fct_database.R` sees `org_info_file` exists → no download needed
+4. **App starts immediately.**
+
+#### Deployed web/Docker (no Electron, no changes):
+
+1. **`run_app.R:26`** — `Sys.getenv("IDEP_DATABASE")` → returns `""` (not set)
+2. Falls through to `data_root = "../../data"`, then fallback to `./data113/`
+3. Database already exists → connects directly
+4. **No change in behavior whatsoever. Zero R source files were modified.**
+
+### Why it will work
+
+- **Fix 1 (positional arg):** Rscript has always accepted the script path as a positional argument. The `--file=` concatenation was an unnecessary change in commit `656501c` that broke argument parsing. Reverting restores the working behavior.
+
+- **Fix 2 (`setwd(data_dir)`):** This is the root cause fix. The original `setwd(app_dir)` pointed CWD at a read-only install directory, which broke all CWD-relative writes in the R source. Changing to `setwd(data_dir)` points CWD at the writable user data directory that Electron already creates. The existing R code (fallback to `./data113`, download to CWD, untar to CWD) all works correctly when CWD is writable. No R source changes needed.
+
+- **Fix 3 (untar skip logic):** The patched `untar` now checks for the specific `data113/` subdirectory instead of any files in the parent directory. This correctly distinguishes first launch (no `data113/` yet, proceed with extraction) from subsequent launches (`data113/` exists, skip extraction).
+
+All three fixes are in `electron/main.js`. The R source code is untouched. Non-Electron environments are completely unaffected.
