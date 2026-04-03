@@ -513,6 +513,34 @@ upgraded independently. This compounds the technical debt from #5 and #6.
 
 ---
 
+## 22. Bootstrap `setwd(app_dir)` Points CWD at Read-Only Install Directory
+
+`main.js` generates a bootstrap R script at runtime. That script includes:
+
+```r
+setwd(app_dir)
+```
+
+Where `app_dir` is the installed application directory:
+- Windows: `C:\Users\...\Programs\idepGolem\resources\app`
+- Linux: `/opt/iDEP/resources/app`
+
+This is a **read-only** directory. Meanwhile, `main.js` already creates a writable user data directory (`data_dir`) and passes it as `IDEP_DATABASE`. The R source code (`fct_database.R`, `run_app.R`) downloads and extracts the database relative to CWD. With CWD pointing at the read-only app directory, all writes fail with "Permission denied" on Linux.
+
+Nothing in the R package requires CWD to be the app directory:
+- Golem resolves paths through `app_sys()` / `system.file()`, not CWD
+- Package loading uses `.libPaths()`, not CWD
+- `getwd()` calls in report modules (`mod_02`, `mod_03`, `mod_04`, `mod_06`) just need a writable directory for temp files
+- `fct_06_pathway.R` uses `getwd()` for a log message only
+
+**Question:** Why was CWD set to the app install directory instead of the writable data directory? The app directory contains the R package and vendored libraries, but none of them are accessed via CWD. Was this a "just to be safe" assumption that R needs to run from the app folder, or was it copied from a template?
+
+**Risk:** **High.** This is the root cause of the Linux Electron first-launch crash (exit code 1, "Permission denied" on database download). On Windows it happened to work because the install directory was writable, masking the bug.
+
+**Verdict:** Fixed. Changed `setwd(app_dir)` to `setwd(data_dir)` so CWD points to the writable user data directory. All existing R download/extract logic works correctly when CWD is writable. Zero R source changes needed — clean separation of concerns.
+
+---
+
 ## Summary Table
 
 | # | Issue | Severity | Likely Explanation |
@@ -538,6 +566,7 @@ upgraded independently. This compounds the technical debt from #5 and #6.
 | 19 | Placeholder description | Low | Template not updated |
 | 20 | Typo in commit message | Low | Rushed |
 | 21 | CI Node 20 was already maintenance-mode at delivery | **High** | Entire Electron/Node/Chromium chain delivered outdated |
+| 22 | Bootstrap `setwd(app_dir)` points CWD at read-only dir | **High** | Assumed R needs to run from app dir; masked on Windows where install dir was writable |
 
 ---
 

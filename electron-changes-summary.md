@@ -55,3 +55,10 @@
 **Task:** All platforms should produce functionally equivalent builds.
 **Action:** Shared `install_packages.R` handles all packages uniformly across Linux and Windows. Archived packages installed via Remotes in DESCRIPTION.
 **Result:** Linux and Windows builds now install identical package sets. Mac workflow pending migration.
+
+## 9. Bootstrap Set CWD to Read-Only App Directory
+
+**Situation:** The bootstrap script ran `setwd(app_dir)`, pointing R's working directory at the read-only install location (`/opt/iDEP/resources/app` on Linux, `...\resources\app` on Windows). The R source code downloads and extracts the database relative to CWD, so all writes failed with "Permission denied" on Linux. Masked on Windows where the install directory happened to be writable.
+**Task:** Point CWD at a writable directory without modifying R source code.
+**Action:** Changed `setwd(app_dir)` to `setwd(data_dir)` in the bootstrap. `data_dir` is the writable user data directory that `main.js` already creates. Nothing in the R package requires CWD to be the app directory — Golem uses `app_sys()`, packages load via `.libPaths()`.
+**Result:** First-launch database download succeeds on all platforms. Zero R source changes — Electron fix stays in Electron.
