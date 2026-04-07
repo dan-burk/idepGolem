@@ -536,40 +536,44 @@ quit(status = if (ok) 0L else 1L, save = "no")
     }
   });
 
-  // honor dynamic port file
-  const portFile = path.join(DATA_PARENT, 'idep_port.txt');
-  let targetPort = port;
-  for (let i = 0; i < 60; i++) {
-    if (fs.existsSync(portFile)) {
-      try {
-        const val = fs.readFileSync(portFile, 'utf8').trim();
-        if (/^\d+$/.test(val)) {
-          targetPort = Number(val);
-          log(`Detected dynamic port from R: ${targetPort}`);
-        }
-        break;
-      } catch (e) { log('[portFile read error]', e && e.stack ? e.stack : String(e)); }
+  // Wait for Shiny's stderr "Listening on" message — the only reliable
+  // signal that Shiny has actually bound a port and is ready for HTTP.
+  // The port file (idep_port.txt) is written *before* runApp() with the
+  // requested port, which may differ from the actual port Shiny uses.
+  setSplashProgress(0.6, 'Waiting for Shiny to start…');
+  const listenDeadline = Date.now() + 600000; // 10 min (covers first-launch downloads)
+
+  while (shinyPortFromLog === null && Date.now() < listenDeadline) {
+    if (childProc.exitCode !== null) {
+      log('[port detect] R exited before Shiny started (code ' + childProc.exitCode + ')');
+      return;
     }
     await new Promise(r => setTimeout(r, 500));
   }
 
-  // Prefer the port reported by Shiny
-  if (shinyPortFromLog !== null && !Number.isNaN(shinyPortFromLog)) {
-    if (shinyPortFromLog !== targetPort) {
-    log(`[port override] Using port from Shiny log (${shinyPortFromLog}) instead of port file (${targetPort})`);
-    }
+  let targetPort;
+  if (shinyPortFromLog !== null) {
     targetPort = shinyPortFromLog;
+  } else {
+    // Fallback: try the port file, then the originally requested port
+    const portFile = path.join(DATA_PARENT, 'idep_port.txt');
+    try {
+      const val = fs.readFileSync(portFile, 'utf8').trim();
+      if (/^\d+$/.test(val)) targetPort = Number(val);
+    } catch {}
+    if (!targetPort) targetPort = port;
+    log('[port fallback] Shiny never reported listening; trying port ' + targetPort);
   }
 
   const finalURL = `http://${host}:${targetPort}`;
   log(`Final targetURL = ${finalURL}`);
-  setSplashProgress(0.7, 'Waiting for Shiny server…');
+  setSplashProgress(0.7, 'Connecting to Shiny server…');
 
   try {
-    await waitForHttp(finalURL, { timeoutMs: 120000, intervalMs: 500 });
+    await waitForHttp(finalURL, { timeoutMs: 30000, intervalMs: 500 });
   } catch (err) {
     log('[waitForHttp] Timeout/Error:', err && (err.stack || String(err)));
-    try { dialog.showErrorBox('Startup Timeout', `App did not start at ${finalURL} within 120s.\nSee log: ${LOG_FILE}`); } catch {}
+    try { dialog.showErrorBox('Startup Timeout', `Shiny reported listening on port ${targetPort} but did not respond to HTTP within 30s.\nSee log: ${LOG_FILE}`); } catch {}
     safeKill(childProc);
     return;
   }
