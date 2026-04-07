@@ -69,3 +69,10 @@
 **Task:** Ensure `main.js` always connects to the port Shiny actually binds to.
 **Action:** Delete `idep_port.txt` before spawning R so the port file loop waits for R to write a fresh value.
 **Result:** Relaunch correctly detects the new port. No more timeout on second run.
+
+## 11. Linux Build Produced Redundant Artifacts
+
+**Situation:** electron-builder was configured to produce both `.AppImage` and `.deb` targets for Linux, plus the `linux-unpacked/` directory. The GitHub Actions artifact (linux-dist.zip) contained all three — roughly 12.5G — even though only one format is needed for distribution.
+**Task:** Reduce artifact size by building only the distribution format we actually ship.
+**Action:** Removed `"AppImage"` from the `linux.target` array in `electron/package.json`, keeping only `"deb"`. Changed the GitHub Actions upload step in `build-electron-linux.yml` to upload only `dist/*.deb` (instead of `dist/**`) and renamed the artifact from `linux-dist` to `linux-installer`.
+**Result:** Linux build produces only the `.deb` installer (~2G), cutting the artifact size by ~10G. The downloaded artifact contains just the installer — no debug logs, update manifests, or unpacked directories.

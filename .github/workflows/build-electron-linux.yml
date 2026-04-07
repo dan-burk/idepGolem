@@ -311,7 +311,7 @@ jobs:
       - name: Upload dist artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: linux-dist
-          path: ${{ env.PACKAGE_DIR }}/dist/**
+          name: linux-installer
+          path: ${{ env.PACKAGE_DIR }}/dist/*.deb
           if-no-files-found: error
           retention-days: 14
