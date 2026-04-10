@@ -138,14 +138,26 @@ function safeKill(proc) {
 
 async function waitForHttp(url, { timeoutMs = 120000, intervalMs = 500 } = {}) {
   const start = Date.now();
+  let attempts = 0;
   while (Date.now() - start < timeoutMs) {
+    attempts++;
     try {
       const ctrl = new AbortController();
-      const to = setTimeout(() => ctrl.abort(), Math.min(5000, intervalMs * 4));
+      // First response from Shiny can take 10-30s while it renders 12 modules,
+      // loads databases, and initializes reactive contexts.  The old 2s abort
+      // killed every attempt before Shiny could finish, causing the timeout.
+      const to = setTimeout(() => ctrl.abort(), 30000);
       const res = await fetch(url, { method: 'GET', signal: ctrl.signal });
       clearTimeout(to);
-      if (res.ok || res.status === 404 || res.status === 403) return true;
-    } catch {}
+      // Any HTTP response proves the server is alive — even a 500 during
+      // heavy startup.  Don't filter by status.
+      log(`[waitForHttp] attempt ${attempts}: got HTTP ${res.status} — server is alive`);
+      return true;
+    } catch (err) {
+      if (attempts <= 3 || attempts % 10 === 0) {
+        log(`[waitForHttp] attempt ${attempts}: ${err.name}: ${err.message}`);
+      }
+    }
     await new Promise(r => setTimeout(r, intervalMs));
   }
   throw new Error(`Timeout waiting for ${url}`);
@@ -570,10 +582,10 @@ quit(status = if (ok) 0L else 1L, save = "no")
   setSplashProgress(0.7, 'Connecting to Shiny server…');
 
   try {
-    await waitForHttp(finalURL, { timeoutMs: 30000, intervalMs: 500 });
+    await waitForHttp(finalURL, { timeoutMs: 120000, intervalMs: 1000 });
   } catch (err) {
     log('[waitForHttp] Timeout/Error:', err && (err.stack || String(err)));
-    try { dialog.showErrorBox('Startup Timeout', `Shiny reported listening on port ${targetPort} but did not respond to HTTP within 30s.\nSee log: ${LOG_FILE}`); } catch {}
+    try { dialog.showErrorBox('Startup Timeout', `Shiny reported listening on port ${targetPort} but did not respond to HTTP within 120s.\nSee log: ${LOG_FILE}`); } catch {}
     safeKill(childProc);
     return;
   }
