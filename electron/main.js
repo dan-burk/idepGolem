@@ -128,12 +128,19 @@ function isWritableDir(p) {
   try { fs.accessSync(p, fs.constants.W_OK); return fs.statSync(p).isDirectory(); } catch { return false; }
 }
 function safeKill(proc) {
+  if (!proc || proc.killed) return;
   try {
-    if (proc && !proc.killed) {
-      if (process.platform === 'win32') proc.kill('SIGTERM');
-      else proc.kill('SIGINT');
+    if (process.platform === 'win32') {
+      // SIGTERM doesn't reliably kill R on Windows — httpuv ignores it.
+      // taskkill /T kills the entire process tree (Rscript + child R).
+      spawn('taskkill', ['/pid', String(proc.pid), '/T', '/F'], { windowsHide: true });
+    } else {
+      // SIGTERM is the standard graceful shutdown on Linux/macOS.
+      proc.kill('SIGTERM');
     }
-  } catch {}
+  } catch (e) {
+    log('[safeKill]', e && e.message ? e.message : String(e));
+  }
 }
 
 async function waitForHttp(url, { timeoutMs = 120000, intervalMs = 500 } = {}) {
