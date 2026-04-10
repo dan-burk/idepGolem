@@ -210,52 +210,9 @@ function showPlaceholder() {
     webPreferences: { contextIsolation: true, nodeIntegration: false },
   });
 
-  const html = `
-    <html>
-    <head>
-      <meta charset="utf-8" />
-      <title>iDEP – Starting…</title>
-    </head>
-    <body style="margin:0;padding:0;font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;background:#0f172a;color:#e5e7eb;display:flex;align-items:center;justify-content:center;height:100vh;">
-      <div style="max-width:480px;width:100%;padding:24px;">
-        <h1 style="margin:0 0 8px 0;font-size:28px;font-weight:600;color:#e5e7eb;">Starting iDEP…</h1>
-        <p style="margin:0 0 16px 0;font-size:14px;color:#9ca3af;">
-          Initializing embedded R and Shiny server. This may take a moment on first launch.
-        </p>
-
-        <div style="margin:16px 0 6px 0;width:100%;height:10px;border-radius:999px;background:#1f2937;overflow:hidden;">
-          <div id="bar" style="height:100%;width:8%;background:#22c55e;transition:width 0.35s ease;"></div>
-        </div>
-        <div style="font-size:12px;color:#9ca3af;">
-          <span id="status">Preparing runtime…</span>
-        </div>
-
-        <div style="margin-top:16px;font-size:11px;color:#6b7280;line-height:1.4;">
-          Log file: <code style="font-size:11px;color:#9ca3af;">${LOG_FILE.replace(/\\/g, '/')}</code><br/>
-          If this screen remains for a long time, please open the log file and share it with the developer.
-        </div>
-      </div>
-
-      <script>
-        window.updateSplash = function(pct, text) {
-          try {
-            var bar = document.getElementById('bar');
-            var label = document.getElementById('status');
-            if (bar && typeof pct === 'number') {
-              var clamped = Math.max(0, Math.min(100, pct));
-              bar.style.width = clamped + '%';
-            }
-            if (label && text) {
-              label.textContent = text;
-            }
-          } catch (e) {
-            // ignore
-          }
-        };
-      </script>
-    </body>
-    </html>
-  `;
+  const splashPath = path.join(__dirname, 'splash.html');
+  const html = fs.readFileSync(splashPath, 'utf8')
+    .replace('{{LOG_FILE}}', LOG_FILE.replace(/\\/g, '/'));
 
   global.win.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(html));
 }
@@ -322,153 +279,13 @@ async function createWindow() {
     log('[R diag error]', e && e.stack ? e.stack : String(e));
   }
 
-  // write bootstrap
-  const bootstrapPath = path.join(DATA_PARENT, 'electron_bootstrap.R');
-  const bootstrapSrc = `
-args <- commandArgs(trailingOnly = TRUE)
-data_dir <- Sys.getenv("IDEP_DATA_DIR", unset = getwd())
-app_dir  <- Sys.getenv("IDEP_APP_DIR",  unset = "${APP_DIR.replace(/\\/g, '/')}")
-lib_dir  <- Sys.getenv("R_LIBS_USER",   unset = file.path(Sys.getenv("R_HOME","."),"library"))
-host     <- Sys.getenv("IDEP_HOST", unset = "127.0.0.1")
-port     <- as.integer(Sys.getenv("IDEP_PORT", unset = "${port}"))
-demo_dir_hint <- Sys.getenv("IDEP_DEMO_DIR", unset = file.path(app_dir, "data113"))
-
-.libPaths(unique(c(normalizePath(lib_dir, winslash="/", mustWork=FALSE), .libPaths())))
-options(shiny.launch.browser = FALSE, golem.app.prod = TRUE)
-
-# ------------------------------------------------------------------------------
-# Avoid re-downloading the large demo tarball every launch.
-# We cache it under data_dir and reuse it if available.
-# ------------------------------------------------------------------------------
-cache_tar <- file.path(data_dir, "data113_cache.tar.gz")
-demo_url  <- "http://bioinformatics.sdstate.edu/data/data113/data113.tar.gz"
-
-try({
-  ns_utils <- asNamespace("utils")
-  orig_download_file <- get("download.file", envir = ns_utils)
-
-  patched_download <- function(url, destfile, ...) {
-    if (identical(url, demo_url) && file.exists(cache_tar)) {
-      message("[bootstrap] Using cached demo tarball: ", cache_tar)
-      dir.create(dirname(destfile), recursive = TRUE, showWarnings = FALSE)
-      file.copy(cache_tar, destfile, overwrite = TRUE)
-      return(0L)
-    }
-
-    status <- orig_download_file(url, destfile, ...)
-
-    if (identical(url, demo_url) && identical(status, 0L) && file.exists(destfile)) {
-      dir.create(dirname(cache_tar), recursive = TRUE, showWarnings = FALSE)
-      if (file.copy(destfile, cache_tar, overwrite = TRUE)) {
-        message("[bootstrap] Cached demo tarball at: ", cache_tar)
-      }
-    }
-
-    status
-  }
-
-  unlockBinding("download.file", ns_utils)
-  assign("download.file", patched_download, envir = ns_utils)
-  lockBinding("download.file", ns_utils)
-}, silent = TRUE)
-
-# ------------------------------------------------------------------------------
-# Avoid re-untarring the demo tarball if data113 already exists and has content.
-# ------------------------------------------------------------------------------
-try({
-  ns_utils2 <- asNamespace("utils")
-  orig_untar <- get("untar", envir = ns_utils2)
-
-  patched_untar <- function(tarfile, files = NULL, list = FALSE,
-                            exdir = ".", compressed = NA,
-                            extras = NULL, verbose = getOption("verbose")) {
-
-    is_demo_tar <- grepl("data113", basename(tarfile), fixed = TRUE)
-    target_dir <- file.path(exdir, "data113")
-
-    if (is_demo_tar &&
-        dir.exists(target_dir) &&
-        length(list.files(target_dir, recursive = TRUE)) > 0L) {
-      message("[bootstrap] Skipping untar for demo data; existing files in: ", target_dir)
-      return(invisible(character()))
-    }
-
-    orig_untar(tarfile,
-               files = files,
-               list  = list,
-               exdir = exdir,
-               compressed = compressed,
-               extras = extras,
-               verbose = verbose)
-  }
-
-  unlockBinding("untar", ns_utils2)
-  assign("untar", patched_untar, envir = ns_utils2)
-  lockBinding("untar", ns_utils2)
-}, silent = TRUE)
-
-# Optional: still log whether we see a pre-extracted demo_dir
-if (dir.exists(demo_dir_hint) && length(list.files(demo_dir_hint, recursive = TRUE)) > 0L) {
-  options(idep.demo_data_dir = demo_dir_hint)
-  message("[bootstrap] Existing demo data dir detected at: ", demo_dir_hint)
-} else {
-  message("[bootstrap] No existing demo data dir at: ", demo_dir_hint)
-}
-
-# log
-logfile <- file.path(data_dir, "electron_r.log")
-try({
-  zz <- file(logfile, open = "a+", encoding = "UTF-8")
-  sink(zz, type = "output", split = TRUE)
-  sink(zz, type = "message", split = TRUE)
-}, silent = TRUE)
-
-# inform Electron about port
-writeLines(as.character(port), file.path(data_dir, "idep_port.txt"))
-
-setwd(data_dir)
-ok <- TRUE
-startup_t0 <- Sys.time()
-
-tryCatch({
-  pkg_t0 <- Sys.time()
-  if (!requireNamespace("ottoPlots", quietly = TRUE)) {
-    stop("Package 'ottoPlots' not found in vendored library: ", paste(.libPaths(), collapse=" | "))
-  }
-  if (!requireNamespace("idepGolem", quietly = TRUE)) {
-    stop("Package 'idepGolem' not found in vendored library: ", paste(.libPaths(), collapse=" | "))
-  }
-  pkg_t1 <- Sys.time()
-  message("[bootstrap] Package load time: ", round(as.numeric(difftime(pkg_t1, pkg_t0, units = "secs")), 2), " s")
-
-  app_t0 <- Sys.time()
-  app <- idepGolem::run_app()
-  if (!inherits(app, "shiny.appobj")) stop("run_app() did not return a shiny.appobj")
-  app_t1 <- Sys.time()
-  message("[bootstrap] run_app() time: ", round(as.numeric(difftime(app_t1, app_t0, units = "secs")), 2), " s")
-
-  shiny_t0 <- Sys.time()
-  shiny::runApp(app, host = host, port = port, launch.browser = FALSE)
-  shiny_t1 <- Sys.time()
-  message("[bootstrap] shiny::runApp() returned after ",
-          round(as.numeric(difftime(shiny_t1, shiny_t0, units = "secs")), 2), " s")
-}, error = function(e) {
-  ok <<- FALSE
-  cat("FATAL:", conditionMessage(e), "\\n")
-}, finally = {
-  startup_t1 <- Sys.time()
-  message("[bootstrap] Total R-side startup time: ",
-          round(as.numeric(difftime(startup_t1, startup_t0, units = "secs")), 2), " s")
-  try({ sink(type = "message"); sink(type = "output") }, silent = TRUE)
-})
-
-quit(status = if (ok) 0L else 1L, save = "no")
-`;
-  try { fs.writeFileSync(bootstrapPath, bootstrapSrc, 'utf8'); }
-  catch (e) {
-    const msg = 'Failed to write bootstrap: ' + (e.stack || String(e));
-    log('[bootstrap write error]', msg);
-    try { dialog.showErrorBox('R Launch Error', msg + `\n\nLog: ${LOG_FILE}`); } catch {}
+  // bootstrap.R is shipped as a static file — no runtime generation needed.
+  // All config is passed via environment variables in the spawn call below.
+  const bootstrapPath = path.join(__dirname, 'bootstrap.R');
+  if (!fs.existsSync(bootstrapPath)) {
+    const msg = `Missing bootstrap.R at ${bootstrapPath}\nLog: ${LOG_FILE}`;
+    log('[FATAL]', msg);
+    try { dialog.showErrorBox('Missing bootstrap.R', msg); } catch {}
     app.quit(); return;
   }
 
@@ -479,7 +296,7 @@ quit(status = if (ok) 0L else 1L, save = "no")
   log(`Rscript       = ${rscript}`);
   log(`bootstrap.R   = ${bootstrapPath}`);
 
-  setSplashProgress(0.35, 'Writing R bootstrap script…');
+  setSplashProgress(0.35, 'Starting R bootstrap…');
 
   // Remove stale port file from previous launch so we don't read an old port
   const stalePortFile = path.join(DATA_PARENT, 'idep_port.txt');

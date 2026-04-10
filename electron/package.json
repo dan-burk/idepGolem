@@ -32,13 +32,15 @@
     "asar": false,                         
     "files": [
       "main.js",
+      "bootstrap.R",
+      "splash.html",
       "renderer/**",
       "preload/**",
       "package.json",
       "node_modules/**",
       "data/**",
       "runtime/**",
-      "app/**" 
+      "app/**"
     ],
     "extraResources": [
       { "from": "resources", "to": "." },
