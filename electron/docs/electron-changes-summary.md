@@ -76,3 +76,17 @@
 **Task:** Reduce artifact size by building only the distribution format we actually ship.
 **Action:** Removed `"AppImage"` from the `linux.target` array in `electron/package.json`, keeping only `"deb"`. Changed the GitHub Actions upload step in `build-electron-linux.yml` to upload only `dist/*.deb` (instead of `dist/**`) and renamed the artifact from `linux-dist` to `linux-installer`.
 **Result:** Linux build produces only the `.deb` installer (~2G), cutting the artifact size by ~10G. The downloaded artifact contains just the installer — no debug logs, update manifests, or unpacked directories.
+
+## 12. Inline R Bootstrap and HTML Extracted to Standalone Files
+
+**Situation:** `main.js` contained a 138-line R bootstrap script inside a JavaScript template literal and a 45-line splash screen as inline HTML. The R code had no syntax highlighting, no linting, required JS-style escaping (`\\n` instead of `\n`), and couldn't be tested independently. Any edit to the R logic required working inside a JS string, making changes error-prone.
+**Task:** Separate concerns so R code lives in `.R` files and HTML lives in `.html` files, while keeping `main.js` focused on orchestration.
+**Action:** Extracted the bootstrap to `electron/bootstrap.R` and the splash screen to `electron/splash.html`. The R script was already reading all config from environment variables (`IDEP_DATA_DIR`, `IDEP_PORT`, etc.) set by `main.js` at spawn time, so the JS template interpolation was unnecessary. The splash HTML uses a single `{{LOG_FILE}}` placeholder replaced at load time. Added both files to the `files` array in `package.json` so electron-builder includes them in the build.
+**Result:** `main.js` dropped from 603 to 433 lines. `bootstrap.R` gets proper R editor support and can be tested standalone via `Rscript bootstrap.R` with the right env vars. No runtime file generation — `main.js` no longer writes the bootstrap to disk on every launch.
+
+## 13. waitForHttp Silently Aborting Requests After 2 Seconds
+
+**Situation:** `waitForHttp` in `main.js` used an `AbortController` that killed each `fetch()` attempt after 2 seconds (`Math.min(5000, intervalMs * 4)` with `intervalMs = 500`). The Shiny app has 12 modules and loads bioinformatics databases — its first HTTP response can take 10-30 seconds to render. Every attempt was aborted before Shiny could respond. The `catch {}` block silently swallowed the `AbortError`, so logs showed nothing. The outer timeout was also reduced from 120s to 30s in a prior commit, compounding the problem. Additionally, the status check only accepted HTTP 200/404/403, silently retrying on any other status (e.g., 500 during heavy startup).
+**Task:** Allow enough time for Shiny's first response and make failures visible.
+**Action:** Increased per-request abort timeout from 2s to 30s. Restored outer timeout from 30s to 120s. Changed status check to accept any HTTP response as proof the server is alive. Added error logging to the catch block (logs error name and message on first 3 attempts and every 10th attempt thereafter).
+**Result:** `waitForHttp` now patiently waits for Shiny's first response instead of aborting it. Failures are visible in `/tmp/idep-electron.log` instead of silently swallowed.
