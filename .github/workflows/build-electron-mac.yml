@@ -3,19 +3,17 @@ name: Build macOS (Electron + R.framework)
 on:
   workflow_dispatch:
 
-  # push:
-  #   branches:
-  #     - electron-packaging
-  #     - 'rel*'
-  #   tags:
-  #     - 'v*'
-  #   paths:
-  #     - "electron/**"
-  #     - "R/**"
-  #     - "app.R"
-  #     - "DESCRIPTION"
-  #     - "package.json"
-  #     - ".github/workflows/build-electron-mac.yml"      
+  push:
+    branches:
+      - master
+      - main
+    paths:
+      - "electron/**"
+      - "R/**"
+      - "app.R"
+      - "DESCRIPTION"
+      - "package.json"
+      - ".github/workflows/build-electron-mac.yml"
 
 jobs:
   build:
@@ -24,7 +22,11 @@ jobs:
       run:
         shell: bash
 
-    # 🔐 Signing / Notarization creds – set these as GitHub secrets
+    # Signing / notarization creds — kept as commented stubs for when an
+    # Apple Developer account is available.  Without them electron-builder
+    # does ad-hoc signing, which is enough for hardenedRuntime entitlements
+    # but triggers Gatekeeper warnings on first launch (users must
+    # right-click → Open, then drag the app into /Applications).
     env:
       # SKIP_NOTARIZE: "true"
       # P12_BASE64: ${{ secrets.P12_BASE64 }}
@@ -33,7 +35,7 @@ jobs:
       # APPLE_ID_PASSWORD: ${{ secrets.MAC_APPLE_ID_PASSWORD }}
       # APPLE_TEAM_ID: ${{ secrets.MAC_APPLE_TEAM_ID }}
       # APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.MAC_APP_SPECIFIC_PASSWORD }}
-      CI: "true" 
+      CI: "true"
 
     steps:
       - name: Checkout
@@ -67,6 +69,22 @@ jobs:
           PKG_SRC=$(dirname "$desc_path" | head -n 1)
           echo "PKG_SRC=$PKG_SRC" >> "$GITHUB_ENV"
           echo "PKG_SRC = $PKG_SRC"
+
+      - name: Detect package name from DESCRIPTION
+        run: |
+          set -euo pipefail
+          desc="$PKG_SRC/DESCRIPTION"
+          if [ ! -f "$desc" ]; then
+            echo "DESCRIPTION not found at: $desc" >&2
+            exit 1
+          fi
+          PKG_NAME=$(grep "^Package:" "$desc" | head -n1 | awk '{print $2}')
+          if [ -z "$PKG_NAME" ]; then
+            echo "Could not parse Package field in: $desc" >&2
+            exit 1
+          fi
+          echo "PKG_NAME=$PKG_NAME" >> "$GITHUB_ENV"
+          echo "PKG_NAME = $PKG_NAME"
 
       - name: Fix invalid filename in R/ (leading underscore)
         run: |
@@ -106,8 +124,10 @@ jobs:
         with:
           r-version: '4.5.1'
 
-      # Mirror R.home() into runtime/R.framework/Resources
-      - name: Stage R.framework (mirror R.home() into runtime/R.framework/Resources)
+      # Mirror R.home() into runtime/R.framework/Resources, then patch
+      # hardcoded /Library/Frameworks paths in bin/R so the runtime is
+      # relocatable inside the .app bundle.
+      - name: Stage R.framework (mirror R.home + patch for relocation)
         run: |
           set -euo pipefail
           RHOME=$(Rscript -e "cat(R.home())")
@@ -130,6 +150,9 @@ jobs:
             chmod +x "${dst}/bin/Rscript"
           fi
 
+          # Patch hardcoded R_HOME_DIR in bin/R so the runtime is portable.
+          bash electron/scripts/patch_r_mac.sh "$dst"
+
       - name: Resolve bundled paths (debug)
         run: |
           set -euo pipefail
@@ -146,201 +169,17 @@ jobs:
           fi
           mkdir -p "$lib"
 
-      - name: Detect package name from DESCRIPTION
-        run: |
-          set -euo pipefail
-          desc="$PKG_SRC/DESCRIPTION"
-          if [ ! -f "$desc" ]; then
-            echo "DESCRIPTION not found at: $desc" >&2
-            exit 1
-          fi
-          PKG_NAME=$(grep "^Package:" "$desc" | head -n1 | awk '{print $2}')
-          if [ -z "$PKG_NAME" ]; then
-            echo "Could not parse Package field in: $desc" >&2
-            exit 1
-          fi
-          echo "PKG_NAME=$PKG_NAME" >> "$GITHUB_ENV"
-          echo "PKG_NAME = $PKG_NAME"        
-          
-      # Patch DESCRIPTION in CI only: drop ggalt from Imports so it's not a hard dep
-      - name: Patch DESCRIPTION for app build (drop ggalt from Imports)
-        run: |
-          set -euo pipefail
-          desc="$PKG_SRC/DESCRIPTION"
-          echo "[patch-desc] Patching DESCRIPTION at: $desc"
-
-          Rscript -e "
-            desc_path <- '$desc'
-            d <- read.dcf(desc_path)
-
-            if (!'Imports' %in% colnames(d)) {
-              stop('No Imports field in DESCRIPTION')
-            }
-
-            im <- strsplit(d[1, 'Imports'], ',')[[1]]
-            im <- trimws(im)
-            im <- im[im != 'ggalt']
-
-            if (length(im)) {
-              d[1, 'Imports'] <- paste(im, collapse = ',\n    ')
-            } else {
-              d[1, 'Imports'] <- ''
-            }
-
-            write.dcf(d, desc_path)
-            cat('[patch-desc] New Imports:\\n', d[1, 'Imports'], '\\n')
-          "          
-
-      - name: Install ottoPlots into bundled R.framework library
+      # Shared across all three platforms.  Reads Imports + Remotes from
+      # DESCRIPTION, installs via PPM-pinned CRAN + Bioc snapshots using
+      # pak::local_install_deps().  Do not duplicate logic here.
+      - name: Install R packages via PPM snapshot
         env:
           GITHUB_PAT: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          app="$PACKAGE_DIR"
-          R_BIN="$app/runtime/R.framework/Resources/bin/Rscript"
-          LIB="$app/runtime/R.framework/Resources/library"
-
-          "$R_BIN" -e "
-            lib <- '$LIB'
-            dir.create(lib, showWarnings = FALSE, recursive = TRUE)
-            .libPaths(lib)
-            repos <- c(CRAN = 'https://cran.r-project.org')
-            if (!requireNamespace('remotes', quietly = TRUE)) {
-              install.packages('remotes', lib = lib, repos = repos)
-            }
-            options(Ncpus = max(1L, parallel::detectCores() - 1L))
-            remotes::install_github('espors/ottoPlots',
-                                    lib          = lib,
-                                    dependencies = TRUE,
-                                    upgrade      = 'never',
-                                    quiet        = TRUE)
-            cat('Installed ottoPlots into:', lib, '\n')
-          "
-
-      - name: Install DESCRIPTION deps into bundled library
-        run: |
-          set -euo pipefail
-          app="$PACKAGE_DIR"
-          lib="$app/runtime/R.framework/Resources/library"
-          rscript="$app/runtime/R.framework/Resources/bin/Rscript"
-          desc="$PKG_SRC/DESCRIPTION"
-
-          libR="${lib//\\//}"
-          descR="${desc//\\//}"
-
-          cat > install_desc.R << 'EOF'
-          args <- commandArgs(trailingOnly=TRUE)
-          desc <- args[1]
-          lib  <- args[2]
-
-          if (!dir.exists(lib)) dir.create(lib, recursive = TRUE, showWarnings = FALSE)
-          .libPaths(c(lib, .libPaths()))
-          message("[install_desc] .libPaths() = ", paste(.libPaths(), collapse=" | "))
-          message("[install_desc] Using lib: ", lib)
-          message("[install_desc] DESCRIPTION: ", desc)
-
-          opt_repos <- c(CRAN="https://cran.r-project.org")
-          options(
-            repos = opt_repos,
-            Ncpus = max(1L, parallel::detectCores()-1L),
-            warn  = 1
-          )
-
-          if (!requireNamespace("BiocManager", quietly=TRUE))
-            install.packages("BiocManager", repos=opt_repos["CRAN"], lib=lib)
-
-          if (!requireNamespace("remotes", quietly=TRUE))
-            install.packages("remotes", repos=opt_repos["CRAN"], lib=lib)
-
-          d <- read.dcf(desc)
-
-          parse_field <- function(field) {
-            if (!field %in% colnames(d)) return(character())
-            x <- gsub("\\n", " ", d[1, field])
-            x <- unlist(strsplit(x, ","))
-            x <- gsub("\\s*\\(.*?\\)\\s*", "", x)
-            trimws(x)
-          }
-
-          pkgs <- unique(c(parse_field("Depends"), parse_field("Imports")))
-          pkgs <- setdiff(pkgs, c("R","base"))
-
-          message("[install_desc] DESCRIPTION deps: ", paste(pkgs, collapse=", "))
-
-          bioc_pkgs <- intersect(
-            pkgs,
-            c(
-              "DESeq2","edgeR","ComplexHeatmap","GSVA","gage",
-              "hgu133plus2.db","InteractiveComplexHeatmap","PCAtools",
-              "pathview","QUBIC","fgsea","WGCNA",
-              "GO.db","SummarizedExperiment","Biobase",
-              "limma","KEGGREST","preprocessCore"
-            )
-          )
-          cran_pkgs <- setdiff(pkgs, bioc_pkgs)
-
-          message("[install_desc] CRAN subset: ", paste(cran_pkgs, collapse=", "))
-          message("[install_desc] Bioc subset: ", paste(bioc_pkgs, collapse=", "))
-
-          if (length(cran_pkgs)) {
-            install.packages(cran_pkgs, lib=lib, dependencies=TRUE)
-          }
-
-          if (length(bioc_pkgs)) {
-            BiocManager::install(bioc_pkgs, lib=lib, ask=FALSE, update=FALSE)
-          }
-
-          # ggalt is archived; special-case it and FORCE it (best-effort)
-          if (!"ggalt" %in% rownames(installed.packages(lib.loc=lib))) {
-            message("[install_desc] Trying to install ggalt 0.4.0 from CRAN archive")
-            try(
-            remotes::install_version(
-              "ggalt",
-              version      = "0.4.0",
-              lib          = lib,
-              upgrade      = "never",
-              dependencies = TRUE
-              ),
-              silent = TRUE
-            )
-          }
-
-          ip <- installed.packages(lib.loc = lib)
-          message("[install_desc] Installed packages in bundled lib: ", nrow(ip))
-
-          # Hard requirements for mac (ggalt excluded now)
-          target <- c(
-            "ComplexHeatmap","DESeq2","gage","ggraph","hgu133plus2.db",
-            "InteractiveComplexHeatmap","pathview","plotly","png",
-            "GSVA","WGCNA"
-          )
-
-          check_one <- function(pkg) {
-            present <- pkg %in% rownames(ip)
-            message(sprintf("[install_desc]   %-25s : %s",
-                            pkg, if (present) "OK" else "MISSING"))
-            present
-          }
-
-          missing_logical <- !vapply(target, check_one, logical(1))
-          missing <- target[missing_logical]
-
-          # ggalt reported but not enforced
-          if (!"ggalt" %in% rownames(ip)) {
-            message("[install_desc] WARNING: ggalt is missing (optional for app build).")
-          } else {
-            message("[install_desc] ggalt present.")
-          }
-
-          if (length(missing)) {
-            stop("Missing required packages for idepGolem on macOS: ",
-                 paste(missing, collapse=", "))
-          } else {
-            message("[install_desc] All key idepGolem deps present.")
-          }
-          EOF
-
-          "$rscript" install_desc.R "$descR" "$libR"
+          rscript="$PACKAGE_DIR/runtime/R.framework/Resources/bin/Rscript"
+          lib="$PACKAGE_DIR/runtime/R.framework/Resources/library"
+          "$rscript" --no-save --no-restore electron/scripts/install_packages.R "$lib"
 
       - name: Build and install idepGolem into R.framework/Resources/library
         env:
@@ -384,6 +223,41 @@ jobs:
           libR="$PACKAGE_DIR/runtime/R.framework/Resources/library"
           "$r" -e "lp <- '$libR'; cat('hgu133plus2.db:', 'hgu133plus2.db' %in% rownames(installed.packages(lib.loc=lp)), '\n')"
 
+      # Pre-flight smoke test: exercise the bundled runtime the same way
+      # bootstrap.R will at app launch, but without starting the shiny
+      # server.  Catches install-time failures (missing deps, namespace
+      # load errors, broken run_app()) in CI instead of on the user's Mac.
+      - name: Smoke-test bundled R runtime
+        run: |
+          set -euo pipefail
+          rscript="$PACKAGE_DIR/runtime/R.framework/Resources/bin/Rscript"
+          lib="$PACKAGE_DIR/runtime/R.framework/Resources/library"
+
+          cat > smoke_test.R << 'EOF'
+          args <- commandArgs(trailingOnly = TRUE)
+          lib <- args[1]
+          .libPaths(c(lib, .libPaths()))
+          cat("[smoke] .libPaths() =", paste(.libPaths(), collapse = " | "), "\n")
+
+          required <- c("ottoPlots", "idepGolem", "shiny",
+                        "DESeq2", "ComplexHeatmap", "WGCNA")
+          for (pkg in required) {
+            if (!requireNamespace(pkg, quietly = TRUE)) {
+              stop("[smoke] FAIL: package '", pkg, "' not loadable")
+            }
+            cat("[smoke] OK: requireNamespace(", pkg, ")\n", sep = "")
+          }
+
+          app <- idepGolem::run_app()
+          if (!inherits(app, "shiny.appobj")) {
+            stop("[smoke] FAIL: idepGolem::run_app() did not return a shiny.appobj")
+          }
+          cat("[smoke] OK: idepGolem::run_app() returned shiny.appobj\n")
+          cat("[smoke] PASS: bundled R runtime is healthy\n")
+          EOF
+
+          "$rscript" --vanilla smoke_test.R "$lib"
+
       - name: Show current file descriptor limits
         run: |
           set -euxo pipefail
@@ -394,11 +268,8 @@ jobs:
       - name: Raise macOS file descriptor limits
         run: |
           set -euxo pipefail
-          # Raise system-wide and per-process file descriptor limits
           sudo sysctl -w kern.maxfiles=65536
           sudo sysctl -w kern.maxfilesperproc=65536
-
-          # Now raise the per-shell limit for this build step
           ulimit -n 65536 || ulimit -n 16384 || ulimit -n 8192
 
       - name: Prune R library (docs, examples, tests)
@@ -406,7 +277,6 @@ jobs:
           set -euxo pipefail
           R_LIB="$PACKAGE_DIR/runtime/R.framework/Resources/library"
 
-          # Remove help/docs/examples/tests/vignettes etc.
           find "$R_LIB" -type d \( \
             -name help -o -name doc -o -name docs -o \
             -name html -o -name examples -o -name demo -o \
@@ -414,9 +284,7 @@ jobs:
             -name vignettes \
           \) -prune -exec rm -rf {} +
 
-          # Optionally strip native libs to shrink them
           find "$R_LIB" \( -name "*.so" -o -name "*.dylib" \) -exec strip -x {} \; || true
-
 
       - name: Build (npm run dist)
         env:
@@ -424,7 +292,6 @@ jobs:
         working-directory: ${{ env.PACKAGE_DIR }}
         run: |
           set -euxo pipefail
-          # still keep this, but it should now succeed at 65536
           ulimit -n 65536 || ulimit -n 16384 || ulimit -n 8192
           npm run dist
 
@@ -432,17 +299,12 @@ jobs:
       #   working-directory: ${{ env.PACKAGE_DIR }}
       #   run: |
       #     set -euxo pipefail
-
       #     DMG_PATH=$(ls dist/*.dmg | head -n1)
-
-      #     echo "Submitting $DMG_PATH for notarization..."
       #     xcrun notarytool submit "$DMG_PATH" \
       #       --apple-id "$APPLE_ID" \
       #       --team-id "$APPLE_TEAM_ID" \
       #       --password "$APPLE_APP_SPECIFIC_PASSWORD" \
       #       --wait
-
-      #     echo "Stapling ticket..."
       #     xcrun stapler staple "$DMG_PATH"
       #     xcrun stapler validate "$DMG_PATH"
 
