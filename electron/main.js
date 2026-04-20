@@ -8,6 +8,12 @@ const net = require('net');
 
 let childProc = null;
 
+// ---------- shutdown handlers ----------
+// Registered at module top-level so they fire even if the user quits during
+// startup (before createWindow finishes), which would otherwise orphan Rscript.
+app.on('before-quit', () => { app.isQuitting = true; safeKill(childProc); });
+app.on('window-all-closed', () => app.quit());
+
 // ---------- logging ----------
 const LOG_FILE = path.join(app.getPath('temp'), 'idep-electron.log');
 function log(...args) {
@@ -432,8 +438,6 @@ async function createWindow() {
     try { dialog.showErrorBox('Load Error', msg + `\n\nLog: ${LOG_FILE}`); } catch {}
   }
 
-  app.on('before-quit', () => { app.isQuitting = true; safeKill(childProc); });
-  app.on('window-all-closed', () => app.quit());
 }
 
 app.whenReady().then(createWindow);
