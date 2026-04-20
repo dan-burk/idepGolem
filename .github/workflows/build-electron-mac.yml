@@ -124,6 +124,25 @@ jobs:
         with:
           r-version: '4.5.1'
 
+      # Apple Clang does not ship OpenMP headers or runtime.  Some native
+      # packages (e.g. runibic) hard-require <omp.h> and will fail with
+      # "fatal error: 'omp.h' file not found" unless libomp is installed
+      # and R's compiler flags are pointed at it.  Linux ships libgomp
+      # with GCC and Windows ships it in Rtools' MinGW, so this step is
+      # Mac-only.
+      - name: Install OpenMP (libomp) for native R packages
+        run: |
+          set -euxo pipefail
+          brew install libomp
+          OMP_PREFIX="$(brew --prefix libomp)"
+          mkdir -p "$HOME/.R"
+          cat >> "$HOME/.R/Makevars" <<EOF
+          CPPFLAGS += -Xclang -fopenmp -I${OMP_PREFIX}/include
+          LDFLAGS  += -L${OMP_PREFIX}/lib -lomp
+          EOF
+          echo "---- ~/.R/Makevars ----"
+          cat "$HOME/.R/Makevars"
+
       # Mirror R.home() into runtime/R.framework/Resources, then patch
       # hardcoded /Library/Frameworks paths in bin/R so the runtime is
       # relocatable inside the .app bundle.
