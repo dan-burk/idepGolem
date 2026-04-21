@@ -125,20 +125,30 @@ jobs:
           r-version: '4.5.1'
 
       # Apple Clang does not ship OpenMP headers or runtime.  Some native
-      # packages (e.g. runibic) hard-require <omp.h> and will fail with
-      # "fatal error: 'omp.h' file not found" unless libomp is installed
-      # and R's compiler flags are pointed at it.  Linux ships libgomp
-      # with GCC and Windows ships it in Rtools' MinGW, so this step is
-      # Mac-only.
+      # packages (e.g. runibic, QUBIC) hard-require <omp.h> and will fail
+      # without libomp.  Linux ships libgomp with GCC and Windows ships
+      # it in Rtools' MinGW, so this step is Mac-only.
+      #
+      # Why the full path to libomp.dylib instead of -L + -lomp:
+      # R's default link line uses `-undefined dynamic_lookup`.  With
+      # Xcode 15+'s linker, that causes `-lomp` to be silently dropped
+      # from the resulting .so's LC_LOAD_DYLIB list when the OpenMP
+      # symbols are treated as "resolve at runtime via flat namespace".
+      # dlopen then can't find the OpenMP runtime and the package fails
+      # to load.  Passing the full path as a positional arg forces the
+      # linker to always record the dylib dependency.
       - name: Install OpenMP (libomp) for native R packages
         run: |
           set -euxo pipefail
           brew install libomp
           OMP_PREFIX="$(brew --prefix libomp)"
+          OMP_DYLIB="${OMP_PREFIX}/lib/libomp.dylib"
+          echo "libomp install_name:"
+          otool -D "$OMP_DYLIB"
           mkdir -p "$HOME/.R"
           cat >> "$HOME/.R/Makevars" <<EOF
           CPPFLAGS += -Xclang -fopenmp -I${OMP_PREFIX}/include
-          LDFLAGS  += -L${OMP_PREFIX}/lib -lomp
+          LDFLAGS  += ${OMP_DYLIB}
           EOF
           echo "---- ~/.R/Makevars ----"
           cat "$HOME/.R/Makevars"
@@ -242,6 +252,55 @@ jobs:
           libR="$PACKAGE_DIR/runtime/R.framework/Resources/library"
           "$r" -e "lp <- '$libR'; cat('hgu133plus2.db:', 'hgu133plus2.db' %in% rownames(installed.packages(lib.loc=lp)), '\n')"
 
+      # Bundle Homebrew's libomp into the R.framework so the .app works
+      # on user Macs that don't have Homebrew installed.  Every .so we
+      # built from source has LC_LOAD_DYLIB pointing at
+      # /opt/homebrew/opt/libomp/lib/libomp.dylib, which won't exist on
+      # end-user machines.  We copy libomp into R.framework/Resources/lib,
+      # rewrite its own install_name to @rpath/libomp.dylib, then patch
+      # every package .so that references the Homebrew path to use
+      # @rpath instead, with an LC_RPATH that resolves to the bundled
+      # lib dir.  electron-builder re-signs .so files ad-hoc after this,
+      # so invalidated signatures aren't a problem.
+      - name: Bundle libomp and relocate install_names
+        run: |
+          set -euxo pipefail
+          R_LIB="$PACKAGE_DIR/runtime/R.framework/Resources/library"
+          R_LIBDIR="$PACKAGE_DIR/runtime/R.framework/Resources/lib"
+          OMP_DYLIB="$(brew --prefix libomp)/lib/libomp.dylib"
+
+          mkdir -p "$R_LIBDIR"
+          cp -f "$OMP_DYLIB" "$R_LIBDIR/libomp.dylib"
+          chmod u+w "$R_LIBDIR/libomp.dylib"
+          install_name_tool -id "@rpath/libomp.dylib" "$R_LIBDIR/libomp.dylib"
+
+          # Path baked into every .so that linked the Homebrew libomp.
+          HOMEBREW_OMP_ID="$(otool -D "$OMP_DYLIB" | tail -n 1 | xargs)"
+          echo "Looking for LC_LOAD_DYLIB references to: ${HOMEBREW_OMP_ID}"
+
+          # @loader_path from library/PKG/libs/FOO.so goes up 3 dirs to
+          # R.framework/Resources, then into /lib to find libomp.dylib.
+          RPATH="@loader_path/../../../lib"
+
+          patched=0
+          while IFS= read -r so; do
+            if otool -L "$so" 2>/dev/null | grep -q "${HOMEBREW_OMP_ID}"; then
+              echo "Patching ${so}"
+              chmod u+w "$so"
+              install_name_tool -change "${HOMEBREW_OMP_ID}" "@rpath/libomp.dylib" "$so"
+              # Adding a duplicate rpath is a non-fatal error — ignore.
+              install_name_tool -add_rpath "$RPATH" "$so" 2>/dev/null || true
+              patched=$((patched + 1))
+            fi
+          done < <(find "$R_LIB" -name "*.so" -type f)
+
+          echo "Patched ${patched} .so file(s)."
+          if [ "$patched" -gt 0 ]; then
+            echo "Verification — one patched .so:"
+            find "$R_LIB" -name "QUBIC.so" -exec otool -L {} \; 2>/dev/null || \
+              find "$R_LIB" -name "runibic.so" -exec otool -L {} \; 2>/dev/null || true
+          fi
+
       # Pre-flight smoke test: exercise the bundled runtime the same way
       # bootstrap.R will at app launch, but without starting the shiny
       # server.  Catches install-time failures (missing deps, namespace
@@ -259,7 +318,8 @@ jobs:
           cat("[smoke] .libPaths() =", paste(.libPaths(), collapse = " | "), "\n")
 
           required <- c("ottoPlots", "idepGolem", "shiny",
-                        "DESeq2", "ComplexHeatmap", "WGCNA")
+                        "DESeq2", "ComplexHeatmap", "WGCNA",
+                        "QUBIC", "runibic")
           for (pkg in required) {
             if (!requireNamespace(pkg, quietly = TRUE)) {
               stop("[smoke] FAIL: package '", pkg, "' not loadable")
