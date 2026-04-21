@@ -10,8 +10,11 @@ RUN echo 'options(BioC_mirror = "https://packagemanager.posit.co/bioconductor/la
     echo 'Sys.setenv("R_BIOC_VERSION" = "3.21")' >> /usr/local/lib/R/etc/Rprofile.site
 
 # 2. System deps (still needed for some packages that compile from source)
+# libhdf5-dev/libblosc-dev/gfortran are required by rhdf5filters and other iDEP
+# bioinformatics dependencies — matches electron/scripts/get_r_linux.sh.
 RUN apt-get update && apt-get install -y \
     build-essential \
+    gfortran \
     libcurl4-openssl-dev \
     libssl-dev \
     libxml2-dev \
@@ -28,11 +31,19 @@ RUN apt-get update && apt-get install -y \
     libglpk-dev \
     libmagick++-6.q16-dev \
     libproj-dev \
+    libhdf5-dev \
+    libblosc-dev \
     cmake \
     git \
     curl \
     jq \
  && rm -rf /var/lib/apt/lists/*
+
+# Ubuntu puts HDF5 headers under /usr/include/hdf5/serial/ rather than /usr/include/,
+# so rhdf5filters (and friends) need these paths to find H5PLextern.h at compile time.
+ENV C_INCLUDE_PATH=/usr/include/hdf5/serial \
+    CPATH=/usr/include/hdf5/serial \
+    LIBRARY_PATH=/usr/lib/aarch64-linux-gnu/hdf5/serial
 
 # 3. Install Docker CLI (for spawning sibling MCP containers)
 RUN curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /usr/share/keyrings/docker-archive-keyring.gpg && \
