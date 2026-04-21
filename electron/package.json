@@ -53,7 +53,7 @@
     },
     "mac": {
       "category": "public.app-category.education",
-      "target": [ "dmg" ],
+      "target": [ "zip" ],
       "icon": "build/icon-mac.png",
       "artifactName": "${productName}-${version}-mac-${arch}.${ext}",
       "hardenedRuntime": true,
