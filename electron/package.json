@@ -52,8 +52,9 @@
       "artifactName": "${productName}-${version}-win-${arch}.${ext}"
     },
     "mac": {
-      "category": "public.app-category.education", 
+      "category": "public.app-category.education",
       "target": [ "dmg" ],
+      "icon": "build/icon-mac.png",
       "artifactName": "${productName}-${version}-mac-${arch}.${ext}",
       "hardenedRuntime": true,
       "gatekeeperAssess": false,
