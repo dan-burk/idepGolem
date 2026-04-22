@@ -10,11 +10,8 @@ RUN echo 'options(BioC_mirror = "https://packagemanager.posit.co/bioconductor/la
     echo 'Sys.setenv("R_BIOC_VERSION" = "3.21")' >> /usr/local/lib/R/etc/Rprofile.site
 
 # 2. System deps (still needed for some packages that compile from source)
-# libhdf5-dev/libblosc-dev/gfortran are required by rhdf5filters and other iDEP
-# bioinformatics dependencies — matches electron/scripts/get_r_linux.sh.
 RUN apt-get update && apt-get install -y \
     build-essential \
-    gfortran \
     libcurl4-openssl-dev \
     libssl-dev \
     libxml2-dev \
@@ -31,25 +28,31 @@ RUN apt-get update && apt-get install -y \
     libglpk-dev \
     libmagick++-6.q16-dev \
     libproj-dev \
-    libhdf5-dev \
-    libblosc-dev \
     cmake \
     git \
     curl \
     jq \
  && rm -rf /var/lib/apt/lists/*
 
-# Ubuntu puts HDF5 headers under /usr/include/hdf5/serial/ rather than /usr/include/,
-# so rhdf5filters (and friends) need these paths to find H5PLextern.h at compile time.
-ENV C_INCLUDE_PATH=/usr/include/hdf5/serial \
-    CPATH=/usr/include/hdf5/serial \
-    LIBRARY_PATH=/usr/lib/aarch64-linux-gnu/hdf5/serial
-
 # 3. Install Docker CLI (for spawning sibling MCP containers)
 RUN curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /usr/share/keyrings/docker-archive-keyring.gpg && \
     echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] https://download.docker.com/linux/ubuntu noble stable" > /etc/apt/sources.list.d/docker.list && \
     apt-get update && apt-get install -y docker-ce-cli && \
     rm -rf /var/lib/apt/lists/*
+
+# 3a. Install docker-wrapper — shadows /usr/bin/docker via /usr/local/bin precedence
+# and blocks dangerous flags (--privileged, host namespace sharing, sensitive bind-mounts)
+# and subcommands (exec, build, buildx, push, commit) before they reach the socket proxy.
+COPY docker-wrapper.sh /usr/local/bin/docker
+RUN chmod 755 /usr/local/bin/docker
+
+# 3b. Egress firewall scaffolding. iptables + ipset for the rules; init-firewall.sh
+# applies default-deny + hostname allowlist; entrypoint.sh runs it as root then drops
+# to shiny. Requires NET_ADMIN capability on the container (set in docker-compose.yml).
+RUN apt-get update && apt-get install -y iptables ipset && rm -rf /var/lib/apt/lists/*
+COPY init-firewall.sh /usr/local/bin/init-firewall.sh
+COPY entrypoint.sh    /usr/local/bin/entrypoint.sh
+RUN chmod 755 /usr/local/bin/init-firewall.sh /usr/local/bin/entrypoint.sh
 
 # 4. Install all R packages needed for analysis, IDE integration, and MCP
 # Note: dependencies=NA skips optional "Suggests" (e.g., otelsdk) for faster builds
@@ -64,12 +67,18 @@ RUN curl -fsSL https://deb.nodesource.com/setup_lts.x | bash - \
 # via onCreateCommand in devcontainer.json — keeps the image stable and avoids
 # rebuilds when these frequently-updated tools release new versions.
 
-# 9. Give shiny passwordless sudo for updating Claude Code from VS Code
+# 9. Create shiny user with no sudo, no privileged groups, user-writable npm prefix.
+# See amd64 Dockerfile for rationale. Key point: giving shiny sudo would let an agent
+# invoke /usr/bin/docker directly and bypass the wrapper at /usr/local/bin/docker.
+# For runtime debugging as root, use `docker exec -u root ...` from the host.
 RUN useradd -m -s /bin/bash shiny && \
-    echo 'shiny ALL=(ALL) NOPASSWD:ALL' >> /etc/sudoers && \
-    usermod -aG root shiny && \
-    usermod -aG staff shiny && \
-    rm -rf /var/lib/apt/lists/*
+    mkdir -p /home/shiny/.npm-global && \
+    chown -R shiny:shiny /home/shiny/.npm-global
+ENV NPM_CONFIG_PREFIX=/home/shiny/.npm-global
+ENV PATH="/home/shiny/.npm-global/bin:${PATH}"
 
 # Expose Shiny server port
 EXPOSE 3838
+
+# Entrypoint applies the egress firewall (root) and drops to shiny for the CMD.
+ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]

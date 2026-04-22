@@ -15,3 +15,4 @@ Rplots.pdf
 /electron/scripts/r-linux/
 /electron/scripts/r-mac/
 /electron/runtime/
+.devcontainer/*/.env

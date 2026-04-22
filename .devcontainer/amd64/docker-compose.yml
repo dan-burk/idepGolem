@@ -1,22 +1,79 @@
 version: '3.8'
 
 services:
+  # Restricts the Docker API surface exposed to the devcontainer.
+  # Upstream: https://github.com/Tecnativa/docker-socket-proxy
+  docker-proxy:
+    image: tecnativa/docker-socket-proxy:latest
+    environment:
+      # Allow: enough for MCP `docker run -i --rm <image>` to work
+      CONTAINERS: 1
+      IMAGES: 1
+      POST: 1
+      # Deny (explicit for auditability — everything else defaults to 0)
+      AUTH: 0
+      BUILD: 0
+      COMMIT: 0
+      CONFIGS: 0
+      DISTRIBUTION: 0
+      EVENTS: 0
+      EXEC: 0
+      GRPC: 0
+      INFO: 0
+      NETWORKS: 0
+      NODES: 0
+      PLUGINS: 0
+      SECRETS: 0
+      SERVICES: 0
+      SESSION: 0
+      SWARM: 0
+      SYSTEM: 0
+      TASKS: 0
+      VOLUMES: 0
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    restart: unless-stopped
+    networks:
+      - docker-proxy-net
+
   # Dev container (R + Claude Code)
   devcontainer:
     build:
       context: .
       dockerfile: Dockerfile
+    cap_add:
+      # Required for init-firewall.sh to write iptables rules in the container's netns.
+      - NET_ADMIN
     volumes:
-      # Claude auth - cross-platform: uses HOME (Linux) or USERPROFILE (Windows)
-      - ${HOME:-${USERPROFILE}}/.claude:/mnt/claude-host:ro
-      # Docker socket - allows spawning sibling containers for MCP servers
-      - /var/run/docker.sock:/var/run/docker.sock
+      # OAuth credential file only — narrower than mounting all of ~/.claude/, so a
+      # compromised agent can't read history/memory/settings from unrelated projects.
+      # Container gets a root-owned 600-perm copy via entrypoint.sh, then chown'd to shiny.
+      - ${HOME:-${USERPROFILE}}/.claude/.credentials.json:/mnt/claude-credentials:ro
+      # This project's memory/history dir only. CLAUDE_PROJECT_HOST is written to .env
+      # by init.sh and expands to ~/.claude/projects/<host-project-hash>/.
+      - ${CLAUDE_PROJECT_HOST}:/mnt/claude-project:ro
       # MCP configuration from host (read-only)
       - ${HOME:-${USERPROFILE}}/.docker/mcp:/mcp:ro
+      # Read-only overlay of .devcontainer/ on top of the workspace bind. Defined here
+      # (not in devcontainer.json's mounts) because VS Code's mount merge can drop the
+      # `readonly` flag — the compose `:ro` short form is respected unambiguously.
+      # HOST_PROJECT_PATH and PROJECT_BASENAME are written to .env by init.sh.
+      - ${HOST_PROJECT_PATH}/.devcontainer:/workspaces/${PROJECT_BASENAME}/.devcontainer:ro
     environment:
       - DISPLAY=${DISPLAY:-:0}
-    user: shiny
-    command: >
-      sh -c "cp -r /mnt/claude-host/. /home/shiny/.claude/ 2>/dev/null || true &&
-             chown -R shiny:shiny /home/shiny/.claude &&
-             sleep infinity"
+      # Route all Docker CLI traffic through the proxy instead of the host socket
+      - DOCKER_HOST=tcp://docker-proxy:2375
+    # `user:` omitted deliberately — entrypoint.sh runs as root to apply iptables,
+    # then exec's this command as shiny via runuser. VS Code attaches as shiny
+    # separately (remoteUser in devcontainer.json).
+    networks:
+      - docker-proxy-net
+    depends_on:
+      - docker-proxy
+    # entrypoint.sh (as root) applies the firewall, stages credentials + project memory
+    # into shiny's home with tight perms, then runuser's this CMD as shiny.
+    command: ["sleep", "infinity"]
+
+networks:
+  docker-proxy-net:
+    driver: bridge

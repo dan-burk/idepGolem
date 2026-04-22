@@ -9,3 +9,5 @@ $run_dev.*
 ^.*\.Rproj$
 ^electron/node_modules$
 ^electron$
+^\.devcontainer$
+^\.github$

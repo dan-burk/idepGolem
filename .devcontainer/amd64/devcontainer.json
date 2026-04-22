@@ -7,6 +7,9 @@
   
   "mounts": [
     "source=${localWorkspaceFolder},target=/workspaces/${localWorkspaceFolderBasename},type=bind,consistency=cached"
+    // The .devcontainer/ read-only overlay lives in docker-compose.yml instead of here.
+    // Mounts declared via devcontainer.json's `readonly` flag don't always survive VS
+    // Code's compose merge — compose `:ro` is enforced unambiguously by Docker.
   ],
 
   "features": {
@@ -47,12 +50,15 @@
   "portsAttributes": {
     "3838": { "label": "Shiny app", "onAutoForward": "openBrowser" }
   },
-  // Install AI CLI tools at container creation (not baked into image) for faster rebuilds
-  "onCreateCommand": "sudo npm install -g @anthropic-ai/claude-code @openai/codex @google/gemini-cli",
+  // Install AI CLI tools at container creation (not baked into image) for faster rebuilds.
+  // No sudo — NPM_CONFIG_PREFIX in the Dockerfile points npm globals at ~/.npm-global.
+  "onCreateCommand": "npm install -g @anthropic-ai/claude-code @openai/codex @google/gemini-cli",
   // Creates minimal config to skip onboarding wizard
   // Optional: Use setup-claude-config.js to pull additional fields from host's ~/.claude.json
   "postCreateCommand": "echo '{\"hasCompletedOnboarding\": true}' > ~/.claude.json",
-  // Refresh credentials from host on every VS Code attach (no rebuild needed)
-  // Re-auth on host, close VS Code window, reopen — done
-  "postAttachCommand": "cp -r /mnt/claude-host/. ~/.claude/ 2>/dev/null || true"
+  // Refresh credentials from host on every VS Code attach (no rebuild needed).
+  // Re-auth on host, close VS Code window, reopen — done.
+  // Only the credential file is re-synced; project memory is intentionally not
+  // re-copied so in-container edits aren't clobbered.
+  "postAttachCommand": "cp /mnt/claude-credentials ~/.claude/.credentials.json && chmod 600 ~/.claude/.credentials.json"
 }
