@@ -81,7 +81,8 @@ RUN gpasswd -d shiny root 2>/dev/null || true && \
     gpasswd -d shiny staff 2>/dev/null || true && \
     sed -i '/^shiny\s\+ALL=(ALL)\s\+NOPASSWD:ALL/d' /etc/sudoers && \
     mkdir -p /home/shiny/.npm-global && \
-    chown -R shiny:shiny /home/shiny/.npm-global
+    chown -R shiny:shiny /home/shiny/.npm-global && \
+    chown -R shiny:shiny /usr/local/lib/R/site-library
 ENV NPM_CONFIG_PREFIX=/home/shiny/.npm-global
 ENV PATH="/home/shiny/.npm-global/bin:${PATH}"
 

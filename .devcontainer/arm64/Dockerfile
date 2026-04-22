@@ -73,7 +73,8 @@ RUN curl -fsSL https://deb.nodesource.com/setup_lts.x | bash - \
 # For runtime debugging as root, use `docker exec -u root ...` from the host.
 RUN useradd -m -s /bin/bash shiny && \
     mkdir -p /home/shiny/.npm-global && \
-    chown -R shiny:shiny /home/shiny/.npm-global
+    chown -R shiny:shiny /home/shiny/.npm-global && \
+    chown -R shiny:shiny /usr/local/lib/R/site-library
 ENV NPM_CONFIG_PREFIX=/home/shiny/.npm-global
 ENV PATH="/home/shiny/.npm-global/bin:${PATH}"
 
