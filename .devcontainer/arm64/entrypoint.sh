@@ -39,4 +39,11 @@ fi
 
 chown -R "$SHINY_UID:$SHINY_GID" "$SHINY_HOME/.claude"
 
+# R site-library is chowned at image build time, but VS Code's updateRemoteUserUID
+# renumbers shiny's UID post-build without recursively updating file ownership.
+# Re-chown here so shiny can install packages regardless of UID remapping.
+if [ -d /usr/local/lib/R/site-library ]; then
+    chown -R "$SHINY_UID:$SHINY_GID" /usr/local/lib/R/site-library
+fi
+
 exec runuser -u shiny -- "$@"
