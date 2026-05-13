@@ -84,7 +84,7 @@ packages <- c(
   "Biobase", "BiocGenerics", "ComplexHeatmap", "DESeq2", "edgeR",
   "fgsea", "gage", "GenomicRanges", "GO.db", "GSVA",
   "hgu133plus2.db", "InteractiveComplexHeatmap", "IRanges", "KEGGREST",
-  "limma", "pathview", "PCAtools", "preprocessCore",
+  "limma", "PCAtools", "preprocessCore",
   "ReactomePA", "S4Vectors", "SummarizedExperiment",
   "annaffy",                             # PGSEA dep
   # Organism annotation databases
@@ -119,10 +119,6 @@ for (pkg in names(archived)) {
 # Must be installed after biclust is available.
 cat("\nInstalling Bioc packages that depend on archived biclust ...\n")
 BiocManager::install(c("QUBIC", "runibic"), lib = lib, update = FALSE, ask = FALSE)
-
-# GitHub packages
-cat("\nInstalling ottoPlots from GitHub ...\n")
-remotes::install_github("espors/ottoPlots", lib = lib, upgrade = "never")
 
 # ==================== Summary ====================
 installed <- list.dirs(lib, recursive = FALSE, full.names = FALSE)

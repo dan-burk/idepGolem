@@ -92,7 +92,7 @@ if (!requireNamespace("pak", quietly = TRUE)) {
 
 # ==================== Install all dependencies from DESCRIPTION ====================
 # pak::local_install_deps() reads Imports, Depends, and Remotes from DESCRIPTION.
-# Remotes: handles archived/GitHub packages (KEGG.db, biclust, PGSEA, ggalt, ottoPlots).
+# Remotes: handles archived/GitHub packages (KEGG.db, biclust, PGSEA, ggalt).
 # Dependency ordering (e.g. biclust before QUBIC) is resolved automatically.
 cat("Installing all dependencies from DESCRIPTION ...\n\n")
 pak::local_install_deps(root = repo_root, lib = lib, upgrade = FALSE, dependencies = TRUE)

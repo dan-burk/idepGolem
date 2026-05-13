@@ -110,9 +110,6 @@ startup_t0 <- Sys.time()
 
 tryCatch({
   pkg_t0 <- Sys.time()
-  if (!requireNamespace("ottoPlots", quietly = TRUE)) {
-    stop("Package 'ottoPlots' not found in vendored library: ", paste(.libPaths(), collapse = " | "))
-  }
   if (!requireNamespace("idepGolem", quietly = TRUE)) {
     stop("Package 'idepGolem' not found in vendored library: ", paste(.libPaths(), collapse = " | "))
   }

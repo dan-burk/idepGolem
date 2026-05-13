@@ -317,7 +317,7 @@ jobs:
           .libPaths(c(lib, .libPaths()))
           cat("[smoke] .libPaths() =", paste(.libPaths(), collapse = " | "), "\n")
 
-          required <- c("ottoPlots", "idepGolem", "shiny",
+          required <- c("idepGolem", "shiny",
                         "DESeq2", "ComplexHeatmap", "WGCNA",
                         "QUBIC", "runibic")
           for (pkg in required) {

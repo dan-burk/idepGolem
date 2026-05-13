@@ -280,8 +280,7 @@ async function createWindow() {
   // OPTIONAL: one-time diagnostics
   try {
     const diag = spawn(rscript, ['-e',
-      "cat('LIBPATHS:\\n', paste(.libPaths(), collapse='\\n'), '\\n'); " +
-      "cat('ottoPlots available? ', requireNamespace('ottoPlots', quietly=TRUE), '\\n')"
+      "cat('LIBPATHS:\\n', paste(.libPaths(), collapse='\\n'), '\\n')"
     ], {
       env: { ...process.env, ...env },
       windowsHide: true,

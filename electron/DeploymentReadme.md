@@ -14,7 +14,6 @@ The app is a desktop wrapper around the **iDEP Shiny application**:
 - **Target OS**: Windows 64-bit, MAC (`windows-latest` on GitHub Actions)
 - **Bundled R**: Full R runtime mirrored into `electron/runtime`
 - **Key extras**:
-  - GitHub-installed **ottoPlots** package
   - Bioconductor / CRAN dependencies from the `idepGolem` DESCRIPTION
   - Caching & lazy loading of **demo data** tarball (`data113`)
 
@@ -27,11 +26,7 @@ The **final output** is a Windows installer / executable produced by `electron-b
 
 All required R packages are installed **into the bundled R library** used at runtime.
 
-### 2.1. Installing `ottoPlots` (GitHub)
-
-The workflow installs **ottoPlots** from GitHub into the bundled library:
-
-### 2.2. DESCRIPTION-based dependencies
+### 2.1. DESCRIPTION-based dependencies
 
 Another CI step parses the `idepGolem` `DESCRIPTION` and installs its dependencies into the same bundled library:
 
@@ -47,7 +42,7 @@ Another CI step parses the `idepGolem` `DESCRIPTION` and installs its dependenci
 
 This step ensures all runtime dependencies are present in `runtime/R.win/library`.
 
-### 2.3. Installing `idepGolem` into the bundled library
+### 2.2. Installing `idepGolem` into the bundled library
 
 The workflow builds and installs the app’s own R package into the bundled library:
 
@@ -74,7 +69,7 @@ On `app.whenReady()`:
 4. **Bootstrap script (`electron_bootstrap.R`)**:
    - Checks if demo data directory already exists and is non-empty.
    - Logs detection of existing demo data.
-   - Verifies presence of `ottoPlots` and `idepGolem`.
+   - Verifies presence of `idepGolem`.
    - Runs the app
 
 5. **Spawning R**:
