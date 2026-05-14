@@ -4,20 +4,14 @@ on:
   workflow_dispatch:
 
   push:
-    branches:
-      - master
-      - main
-    paths:
-      - "electron/**"
-      - "R/**"
-      - "app.R"
-      - "DESCRIPTION"
-      - "package.json"
-      - ".github/workflows/build-electron-linux.yml"
+    tags:
+      - "v*"
 
 jobs:
   build:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     defaults:
       run:
         shell: bash
@@ -325,3 +319,10 @@ jobs:
           path: ${{ env.PACKAGE_DIR }}/dist/*.deb
           if-no-files-found: error
           retention-days: 14
+
+      - name: Publish to GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ env.PACKAGE_DIR }}/dist/*.deb
+          fail_on_unmatched_files: true

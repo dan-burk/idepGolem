@@ -2,20 +2,16 @@ name: Build Windows (Electron + R.win)
 
 on:
   workflow_dispatch:
+
   push:
-    branches:
-      - master
-      - main
-    paths:
-      - "electron/**"
-      - "R/**"
-      - "app.R"
-      - "DESCRIPTION"
-      - "package.json"
-      - ".github/workflows/build-electron-windows.yml"
+    tags:
+      - "v*"
+
 jobs:
   build:
     runs-on: windows-latest
+    permissions:
+      contents: write
     defaults:
       run:
         shell: pwsh
@@ -201,4 +197,11 @@ jobs:
           path: ${{ env.PACKAGE_DIR }}/dist/*.exe
           if-no-files-found: error
           retention-days: 14
+
+      - name: Publish to GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ env.PACKAGE_DIR }}/dist/*.exe
+          fail_on_unmatched_files: true
           

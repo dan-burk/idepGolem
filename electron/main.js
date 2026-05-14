@@ -4,6 +4,7 @@ const path = require('path');
 const fs = require('fs');
 const { spawn } = require('child_process');
 const net = require('net');
+const { checkForUpdates } = require('./updater');
 // Node 22+ (bundled in Electron 39) provides global fetch natively
 
 let childProc = null;
@@ -431,6 +432,10 @@ async function createWindow() {
     }
     await global.win.loadURL(finalURL);
     setSplashProgress(-1, ''); // clear taskbar progress
+    // 5s delay keeps the GitHub fetch out of Shiny startup contention.
+    setTimeout(() => {
+      checkForUpdates(global.win).catch(e => log('[update check]', e && e.message ? e.message : String(e)));
+    }, 5000);
   } catch (e) {
     const msg = `Failed to load ${finalURL}: ${e && e.stack ? e.stack : String(e)}`;
     log('[loadURL error]', msg);
