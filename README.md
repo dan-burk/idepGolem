@@ -173,3 +173,16 @@ rmarkdown::render(
 )
 ```
 `report_params` is included in every `.RData` download and mirrors the `params` object the Shiny app sends to the report renderer, so the resulting HTML will match what you obtained in the Prep tab.
+
+## Desktop App Release Lifecycle
+
+1. `git push`
+2. `git tag v1.0.{x}`
+3. `git push origin tag v1.0.{x}`
+4. Install app
+5. Make updates
+6. Bump `electron/package.json` version to `1.0.{x+1}`
+7. `git push`
+8. `git tag v1.0.{x+1}`
+9. `git push origin tag v1.0.{x+1}`
+10. Restart desktop app — notification appears to update to latest version.
