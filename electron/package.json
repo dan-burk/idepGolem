@@ -10,12 +10,12 @@
   },  
   "repository": {
     "type": "git",
-    "url": "https://github.com/gexijin/idepGolem.git"
+    "url": "https://github.com/dan-burk/idepGolem.git"
   },  
   "license": "CC-BY-NC-3.0",
   "scripts": {
     "start": "electron .",
-    "dist": "electron-builder"
+    "dist": "electron-builder --publish=never"
   },
   "dependencies": {
     "fs-extra": "^11.2.0",
