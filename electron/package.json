@@ -19,6 +19,7 @@
   },
   "dependencies": {
     "fs-extra": "^11.2.0",
+    "jose": "^4.15.9",
     "tar": "^6.2.1"
   },
   "devDependencies": {
