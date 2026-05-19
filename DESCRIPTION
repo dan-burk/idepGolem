@@ -109,7 +109,8 @@ Imports:
     org.Rn.eg.db,
     org.Sc.sgd.db,
     org.Ss.eg.db,
-    org.Xl.eg.db
+    org.Xl.eg.db,
+    jose
 Remotes:
     PGSEA=url::https://bioconductor.org/packages/3.10/bioc/src/contrib/PGSEA_1.60.0.tar.gz,
     KEGG.db=url::http://www.bioconductor.org/packages//2.11/data/annotation/src/contrib/KEGG.db_2.8.0.tar.gz,

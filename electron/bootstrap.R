@@ -11,6 +11,17 @@ host     <- Sys.getenv("IDEP_HOST", unset = "127.0.0.1")
 port     <- as.integer(Sys.getenv("IDEP_PORT", unset = "7777"))
 demo_dir_hint <- Sys.getenv("IDEP_DEMO_DIR", unset = file.path(app_dir, "data113"))
 
+# Phase 2d/2e: HMAC secret for the Electron → Shiny handshake.
+# Empty when launched outside Electron OR when IDEP_AUTH_DISABLED=1 was set.
+# Stored as an R option so package code can read it via getOption("idep.shiny_hmac_secret").
+shiny_hmac_secret <- Sys.getenv("SHINY_HMAC_SECRET", unset = "")
+options(idep.shiny_hmac_secret = shiny_hmac_secret)
+if (nzchar(shiny_hmac_secret)) {
+  message("[bootstrap] SHINY_HMAC_SECRET received; auth handshake enabled.")
+} else {
+  message("[bootstrap] SHINY_HMAC_SECRET not set; running without auth (dev mode).")
+}
+
 .libPaths(unique(c(normalizePath(lib_dir, winslash = "/", mustWork = FALSE), .libPaths())))
 options(shiny.launch.browser = FALSE, golem.app.prod = TRUE)
 

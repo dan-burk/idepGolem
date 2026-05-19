@@ -5,7 +5,12 @@ const fs = require('fs');
 const { spawn } = require('child_process');
 const net = require('net');
 const { checkForUpdates } = require('./updater');
+const { ensureEntitlement, setupShinyRequestAuth } = require('./auth-integration');
+const { getOrCreateHmacSecret } = require('./hmac');
 // Node 22+ (bundled in Electron 39) provides global fetch natively
+
+// Set IDEP_AUTH_DISABLED=1 to skip OAuth + HMAC entirely (emergency fallback).
+const AUTH_DISABLED = process.env.IDEP_AUTH_DISABLED === '1';
 
 let childProc = null;
 
@@ -244,6 +249,28 @@ async function createWindow() {
 
   // show splash early
   showPlaceholder();
+
+  // --- Auth gate (Phase 2c) ---
+  // Run OAuth + entitlement check before spawning R. On failure, show a
+  // dialog and quit. Set IDEP_AUTH_DISABLED=1 in the env to bypass entirely.
+  let identity = null;
+  let hmacSecret = null;
+  if (!AUTH_DISABLED) {
+    try {
+      const result = await ensureEntitlement((pct, text) => setSplashProgress(pct, text));
+      identity = result.identity;
+      log('[auth]', `Signed in as ${identity.email} (tier=${identity.tier}, fromCache=${result.fromCache})`);
+      hmacSecret = getOrCreateHmacSecret();
+    } catch (err) {
+      const msg = `Sign-in failed: ${err && err.message ? err.message : String(err)}\n\nYou can bypass auth temporarily by setting IDEP_AUTH_DISABLED=1.`;
+      log('[auth error]', msg);
+      try { dialog.showErrorBox('Sign-in Failed', msg); } catch {}
+      app.quit(); return;
+    }
+  } else {
+    log('[auth] DISABLED via IDEP_AUTH_DISABLED — skipping sign-in');
+  }
+
   setSplashProgress(0.1, 'Preparing data directory…');
 
   // demo data directory under app
@@ -329,6 +356,9 @@ async function createWindow() {
         IDEP_PORT: String(port),
         IDEP_DEMO_DIR: DEMO_DIR, // pass demo dir hint to R
         R_LIBS_USER: env?.R_LIBS || path.join(path.dirname(rscript), '..', 'library'),
+        // Phase 2d: Shiny verifies the per-session JWT signed with this secret.
+        // Empty string when auth is disabled so R-side can detect that state.
+        SHINY_HMAC_SECRET: hmacSecret || '',
       },
       windowsHide: true,
     });
@@ -410,6 +440,12 @@ async function createWindow() {
   const finalURL = `http://${host}:${targetPort}`;
   log(`Final targetURL = ${finalURL}`);
   setSplashProgress(0.7, 'Connecting to Shiny server…');
+
+  // Phase 2d: inject HMAC-signed JWT on every request to the Shiny URL.
+  // Done before loadURL so the very first request (HTML fetch) is authenticated.
+  if (!AUTH_DISABLED && hmacSecret && identity) {
+    setupShinyRequestAuth({ host, port: targetPort, hmacSecret, identity, log });
+  }
 
   try {
     await waitForHttp(finalURL, { timeoutMs: 120000, intervalMs: 1000 });

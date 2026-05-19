@@ -1,27 +1,29 @@
 // Standalone CLI test for the PKCE OAuth flow + entitlement endpoint.
 //
 // Usage (PowerShell, from electron/ folder):
-//   $env:GOOGLE_OAUTH_CLIENT_ID="<client-id>.apps.googleusercontent.com"
-//   $env:GOOGLE_OAUTH_CLIENT_SECRET="<client-secret>"
 //   node test-auth.js
+//
+// Reads credentials from electron/.env (same file the full app uses).
 //
 // What it does:
 //   1. Runs the PKCE OAuth flow against Google in your system browser.
 //   2. Receives id_token + access_token + refresh_token.
 //   3. Posts the id_token to the deployed /entitlement function.
-//   4. Prints the entitlement JWT it returns.
+//   4. Verifies the returned entitlement JWT against the embedded public key.
+
+const path = require('path');
+require('dotenv').config({ path: path.join(__dirname, '.env') });
 
 const { exec } = require('child_process');
 const { runPKCEFlow } = require('./auth');
 const { verifyEntitlement, entitlementStatus } = require('./entitlement');
 
-const ENTITLEMENT_URL = 'https://entitlement-auzgq7lgsq-uc.a.run.app';
+const clientId       = process.env.GOOGLE_OAUTH_CLIENT_ID;
+const clientSecret   = process.env.GOOGLE_OAUTH_CLIENT_SECRET;
+const ENTITLEMENT_URL = process.env.ENTITLEMENT_URL;
 
-const clientId     = process.env.GOOGLE_OAUTH_CLIENT_ID;
-const clientSecret = process.env.GOOGLE_OAUTH_CLIENT_SECRET;
-
-if (!clientId || !clientSecret) {
-  console.error('Set GOOGLE_OAUTH_CLIENT_ID and GOOGLE_OAUTH_CLIENT_SECRET first.');
+if (!clientId || !clientSecret || !ENTITLEMENT_URL) {
+  console.error('Missing values in electron/.env. Copy .env.example to .env and fill in.');
   process.exit(1);
 }
 
