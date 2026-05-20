@@ -102,7 +102,9 @@ function buildAuthURL({ clientId, redirectUri, codeChallenge, state, scopes }) {
     code_challenge_method: 'S256',
     state,
     access_type:           'offline',
-    prompt:                'consent',
+    // select_account → always show the Google account chooser (multi-account
+    // machines / "switch account"). consent → guarantees a refresh_token.
+    prompt:                'select_account consent',
   });
   return `${GOOGLE_AUTH_URL}?${params}`;
 }

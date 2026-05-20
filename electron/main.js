@@ -1,5 +1,5 @@
 // main.js
-const { app, BrowserWindow, dialog } = require('electron');
+const { app, BrowserWindow, dialog, Menu } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const { spawn } = require('child_process');
@@ -7,6 +7,7 @@ const net = require('net');
 const { checkForUpdates } = require('./updater');
 const { ensureEntitlement, setupShinyRequestAuth } = require('./auth-integration');
 const { getOrCreateHmacSecret } = require('./hmac');
+const { clearEntitlement } = require('./cache');
 // Node 22+ (bundled in Electron 39) provides global fetch natively
 
 // Set IDEP_AUTH_DISABLED=1 to skip OAuth + HMAC entirely (emergency fallback).
@@ -231,9 +232,69 @@ function showPlaceholder() {
 
   const splashPath = path.join(__dirname, 'splash.html');
   const html = fs.readFileSync(splashPath, 'utf8')
-    .replace('{{LOG_FILE}}', LOG_FILE.replace(/\\/g, '/'));
+    .replace('{{LOG_FILE}}', LOG_FILE.replace(/\\/g, '/'))
+    .replace('{{APP_VERSION}}', app.getVersion());
 
   global.win.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(html));
+}
+
+// ---------- application menu ----------
+// Sign Out: clear the cached entitlement and relaunch. Next launch finds no
+// valid cache and runs the OAuth flow again — with select_account, the user
+// can pick a different Google account.
+async function signOutFlow() {
+  const win = global.win;
+  const opts = {
+    type: 'question',
+    buttons: ['Sign Out', 'Cancel'],
+    defaultId: 0,
+    cancelId: 1,
+    title: 'Sign Out',
+    message: 'Sign out of iDEP?',
+    detail: 'iDEP will close and restart. You will need to sign in again.',
+  };
+  const { response } = win
+    ? await dialog.showMessageBox(win, opts)
+    : await dialog.showMessageBox(opts);
+  if (response !== 0) return;
+
+  log('[auth] Sign out requested — clearing cached entitlement');
+  try { clearEntitlement(); } catch (e) { log('[auth] clearEntitlement failed', e && e.message); }
+  app.isQuitting = true;
+  app.relaunch();
+  app.quit();
+}
+
+function buildAppMenu() {
+  const template = [
+    { label: 'File', submenu: [{ role: 'quit' }] },
+    {
+      label: 'Edit',
+      submenu: [
+        { role: 'undo' }, { role: 'redo' }, { type: 'separator' },
+        { role: 'cut' }, { role: 'copy' }, { role: 'paste' }, { role: 'selectAll' },
+      ],
+    },
+    {
+      label: 'View',
+      submenu: [
+        { role: 'reload' }, { role: 'forceReload' }, { role: 'toggleDevTools' },
+        { type: 'separator' },
+        { role: 'resetZoom' }, { role: 'zoomIn' }, { role: 'zoomOut' },
+        { type: 'separator' }, { role: 'togglefullscreen' },
+      ],
+    },
+  ];
+
+  // No account to sign out of when auth is bypassed.
+  if (!AUTH_DISABLED) {
+    template.push({
+      label: 'Account',
+      submenu: [{ label: 'Sign Out', click: () => signOutFlow() }],
+    });
+  }
+
+  return Menu.buildFromTemplate(template);
 }
 
 // ---------- bootstrap ----------
@@ -480,4 +541,7 @@ async function createWindow() {
 
 }
 
-app.whenReady().then(createWindow);
+app.whenReady().then(() => {
+  Menu.setApplicationMenu(buildAppMenu());
+  return createWindow();
+});
