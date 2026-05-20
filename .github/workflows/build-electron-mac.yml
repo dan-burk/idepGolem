@@ -387,6 +387,12 @@ jobs:
           set -euxo pipefail
           SRC=$(ls dist/*.dmg | head -n1)
           echo "Original dmg:"; ls -la "$SRC"
+          # Free disk space before converting: the unpacked .app
+          # (dist/mac-arm64) is no longer needed once the dmg exists, and
+          # hdiutil convert needs room for a second ~2 GB copy. macOS
+          # runners are disk-tight, so this prevents an out-of-space failure.
+          rm -rf dist/mac-arm64 dist/mac
+          df -h .
           hdiutil convert "$SRC" -format ULMO -o dist/_ulmo.dmg
           rm -f "$SRC" "$SRC.blockmap"
           mv dist/_ulmo.dmg "$SRC"
