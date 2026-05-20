@@ -378,6 +378,22 @@ jobs:
           ulimit -n 65536 || ulimit -n 16384 || ulimit -n 8192
           npm run dist
 
+      # electron-builder produces a zlib (UDZO) dmg. Recompress with LZMA
+      # (ULMO) to fit under GitHub Releases' 2 GiB per-asset limit.
+      # ULMO mounts on macOS 11+; all arm64 Macs qualify.
+      - name: Recompress DMG with LZMA (ULMO)
+        working-directory: ${{ env.PACKAGE_DIR }}
+        run: |
+          set -euxo pipefail
+          SRC=$(ls dist/*.dmg | head -n1)
+          echo "Original dmg:"; ls -la "$SRC"
+          hdiutil convert "$SRC" -format ULMO -o dist/_ulmo.dmg
+          rm -f "$SRC" "$SRC.blockmap"
+          mv dist/_ulmo.dmg "$SRC"
+          BYTES=$(stat -f%z "$SRC")
+          echo "Recompressed dmg: $BYTES bytes (GitHub Release limit: 2147483648)"
+          ls -la "$SRC"
+
       # - name: Notarize DMG (only on tags v*)
       #   working-directory: ${{ env.PACKAGE_DIR }}
       #   run: |
