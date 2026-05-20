@@ -29,9 +29,10 @@
     "@electron/notarize": "^2.5.0"
   },
   "build": {
-    "appId": "com.idepgolem.app",           
-    "productName": "iDEP",            
-    "asar": false,                         
+    "appId": "com.idepgolem.app",
+    "productName": "iDEP",
+    "asar": false,
+    "compression": "maximum",
     "files": [
       "main.js",
       "updater.js",
@@ -63,7 +64,7 @@
     },
     "mac": {
       "category": "public.app-category.education",
-      "target": [ "zip" ],
+      "target": [ "dmg" ],
       "icon": "build/icon-mac.png",
       "artifactName": "${productName}-${version}-mac-${arch}.${ext}",
       "hardenedRuntime": true,
