@@ -34,11 +34,13 @@
     "asar": false,                         
     "files": [
       "main.js",
+      "updater.js",
       "auth.js",
       "auth-integration.js",
       "cache.js",
       "entitlement.js",
       "hmac.js",
+      ".env",
       "bootstrap.R",
       "splash.html",
       "keys/**",
