@@ -176,13 +176,30 @@ rmarkdown::render(
 
 ## Desktop App Release Lifecycle
 
-1. `git push`
-2. `git tag v1.0.{x}`
-3. `git push origin tag v1.0.{x}`
-4. Install app
-5. Make updates
-6. Bump `electron/package.json` version to `1.0.{x+1}`
-7. `git push`
-8. `git tag v1.0.{x+1}`
-9. `git push origin tag v1.0.{x+1}`
-10. Restart desktop app — notification appears to update to latest version.
+Desktop builds (Windows, Linux, macOS) are released by pushing a git tag with
+the `desktop-v` prefix. `electron/package.json`'s `version` field is the single
+source of truth — the tag must match it, and CI fails fast if it doesn't.
+
+Use `npm version` so the version bump, commit, and tag are created together and
+can never drift apart:
+
+```bash
+cd electron
+npm version patch        # e.g. 1.0.3 -> 1.0.4: bumps package.json, makes a
+                         # commit, and creates the tag desktop-v1.0.4
+                         # (desktop-v prefix is set in electron/.npmrc)
+git push --follow-tags   # pushes the commit and its matching tag together
+```
+
+- Use `patch`, `minor`, or `major` (or `npm version 1.2.3` for an explicit
+  version) depending on the change.
+- Pushing the `desktop-v*` tag triggers the Windows, Linux, and macOS build
+  workflows in parallel. Each one verifies the tag matches
+  `electron/package.json`, builds the installer, and publishes it to a single
+  GitHub Release.
+- Commit and push your code changes first; `npm version` requires a clean
+  working tree and then adds its own version-bump commit on top.
+
+To install or update, download the installer for your OS from the
+[latest release](https://github.com/dan-burk/idepGolem/releases). A running
+desktop app checks for a newer release on startup and prompts to update.

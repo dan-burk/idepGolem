@@ -5,7 +5,7 @@ on:
 
   push:
     tags:
-      - "v*"
+      - "desktop-v*"
 
 jobs:
   build:
@@ -112,19 +112,25 @@ jobs:
             npm install -D electron-builder@26.8.2
           fi
 
-      # The git tag is the single source of truth for the release version.
-      # electron-builder's ${version} token and Electron's app.getVersion()
-      # both read package.json's "version" field — NOT the git tag. Sync it
-      # from the tag here so release artifacts are named correctly and the
-      # in-app updater doesn't nag about a version the user already has.
-      - name: Sync package.json version to git tag
-        if: startsWith(github.ref, 'refs/tags/v')
+      # electron/package.json's "version" is the single source of truth for
+      # the release version. Release tags (desktop-v*) must match it — running
+      # `npm version` in electron/ keeps the bump, commit, and tag in sync
+      # automatically. This guard fails fast (~10s) if a mismatched tag is
+      # pushed, instead of building and publishing a misnamed installer.
+      - name: Verify tag matches package.json version
+        if: startsWith(github.ref, 'refs/tags/desktop-v')
         working-directory: ${{ env.PACKAGE_DIR }}
         run: |
-          set -euxo pipefail
-          VER="${GITHUB_REF_NAME#v}"
-          npm version "$VER" --no-git-tag-version --allow-same-version
-          echo "package.json version set to $VER"
+          set -euo pipefail
+          TAG_VER="${GITHUB_REF_NAME#desktop-v}"
+          PKG_VER="$(node -p "require('./package.json').version")"
+          echo "tag version  = $TAG_VER"
+          echo "package.json = $PKG_VER"
+          if [ "$TAG_VER" != "$PKG_VER" ]; then
+            echo "::error::Tag '$GITHUB_REF_NAME' does not match electron/package.json version '$PKG_VER'. Run 'npm version' in electron/ to keep them in sync."
+            exit 1
+          fi
+          echo "Version check OK — building desktop-v$PKG_VER"
 
       # Write OAuth config from GitHub Actions secrets so it ships in the installer.
       - name: Write electron/.env from secrets
@@ -345,7 +351,7 @@ jobs:
           retention-days: 14
 
       - name: Publish to GitHub Release
-        if: startsWith(github.ref, 'refs/tags/v')
+        if: startsWith(github.ref, 'refs/tags/desktop-v')
         uses: softprops/action-gh-release@v2
         with:
           files: ${{ env.PACKAGE_DIR }}/dist/*.deb

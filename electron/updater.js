@@ -3,7 +3,9 @@ const { app, dialog, shell } = require('electron');
 const RELEASES_API = 'https://api.github.com/repos/dan-burk/idepGolem/releases/latest';
 
 function parseVersion(v) {
-  const main = String(v).replace(/^v/, '').trim().split(/[-+]/)[0];
+  // Tags use a "desktop-v" prefix (e.g. desktop-v1.0.3); also tolerate a
+  // bare "v" prefix from older releases. Strip both before parsing.
+  const main = String(v).replace(/^desktop-/, '').replace(/^v/, '').trim().split(/[-+]/)[0];
   const parts = main.split('.').map(p => parseInt(p, 10));
   if (parts.length === 0 || parts.some(n => !Number.isFinite(n))) return null;
   return parts;
@@ -43,7 +45,7 @@ async function checkForUpdates(parentWin) {
     clearTimeout(to);
   }
 
-  const latest = String(release.tag_name || '').replace(/^v/, '');
+  const latest = String(release.tag_name || '').replace(/^desktop-/, '').replace(/^v/, '');
   if (!latest || !isNewer(latest, current)) return;
 
   const detail = String(release.body || '').slice(0, 500);
