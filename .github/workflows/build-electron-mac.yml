@@ -373,19 +373,29 @@ jobs:
           sudo sysctl -w kern.maxfilesperproc=65536
           ulimit -n 65536 || ulimit -n 16384 || ulimit -n 8192
 
-      - name: Prune R library (docs, examples, tests)
+      - name: Prune R library (docs, examples, tests, headers)
         run: |
           set -euxo pipefail
           R_LIB="$PACKAGE_DIR/runtime/R.framework/Resources/library"
+          FW="$PACKAGE_DIR/runtime/R.framework/Resources"
 
+          echo "Library size BEFORE prune:"; du -sh "$R_LIB" || true
+
+          # 'include' = C/C++ headers (Boost/BH, Rcpp, Eigen, ...). Build-time
+          # only — never read at runtime by a pre-built bundle. Safe to delete.
           find "$R_LIB" -type d \( \
             -name help -o -name doc -o -name docs -o \
             -name html -o -name examples -o -name demo -o \
             -name tests -o -name testthat -o -name unitTests -o \
-            -name vignettes \
+            -name vignettes -o -name include \
           \) -prune -exec rm -rf {} +
 
+          # R's own non-runtime extras: manuals, test suite, C headers.
+          rm -rf "$FW/doc" "$FW/tests" "$FW/include" || true
+
           find "$R_LIB" \( -name "*.so" -o -name "*.dylib" \) -exec strip -x {} \; || true
+
+          echo "Library size AFTER prune:"; du -sh "$R_LIB" || true
 
       - name: Build (npm run dist)
         env:
@@ -403,19 +413,24 @@ jobs:
         working-directory: ${{ env.PACKAGE_DIR }}
         run: |
           set -euxo pipefail
+          LIMIT=2147483648
           SRC=$(ls dist/*.dmg | head -n1)
-          echo "Original dmg:"; ls -la "$SRC"
-          # Free disk space before converting: the unpacked .app
-          # (dist/mac-arm64) is no longer needed once the dmg exists, and
-          # hdiutil convert needs room for a second ~2 GB copy. macOS
-          # runners are disk-tight, so this prevents an out-of-space failure.
+          UDZO_BYTES=$(stat -f%z "$SRC")
+          echo "UDZO dmg:  $UDZO_BYTES bytes"
+          # The unpacked .app (dist/mac-arm64) is no longer needed once the
+          # dmg exists; remove it so hdiutil convert has room for its copy.
           rm -rf dist/mac-arm64 dist/mac
           df -h .
           hdiutil convert "$SRC" -format ULMO -o dist/_ulmo.dmg
           rm -f "$SRC" "$SRC.blockmap"
           mv dist/_ulmo.dmg "$SRC"
-          BYTES=$(stat -f%z "$SRC")
-          echo "Recompressed dmg: $BYTES bytes (GitHub Release limit: 2147483648)"
+          ULMO_BYTES=$(stat -f%z "$SRC")
+          echo "ULMO dmg:  $ULMO_BYTES bytes (GitHub Release limit: $LIMIT)"
+          if [ "$ULMO_BYTES" -lt "$LIMIT" ]; then
+            echo "✅ Under the 2 GiB limit — publishable."
+          else
+            echo "❌ Over by $((ULMO_BYTES - LIMIT)) bytes."
+          fi
           ls -la "$SRC"
 
       # - name: Notarize DMG (only on tags v*)
@@ -439,6 +454,9 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
+      # Publishes only if the dmg is under GitHub's 2 GiB asset limit; the
+      # recompress step's size readout tells you whether a tag build will
+      # succeed here. If still over, see auth-pricing-setup/roadmap.md.
       - name: Publish to GitHub Release
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
