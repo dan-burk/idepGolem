@@ -35,6 +35,24 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      # macOS runners ship ~20-30 GB of iOS/tvOS/watchOS simulator runtimes
+      # and extra Xcode versions, none needed for an Electron build. dmgbuild
+      # copies the ~5-6 GB app into a temp disk image (peak = app twice over),
+      # so freeing this space prevents "No space left on device".
+      - name: Free up disk space
+        run: |
+          set -uxo pipefail
+          echo "=== before ==="; df -h /
+          sudo rm -rf /Library/Developer/CoreSimulator/Profiles/Runtimes/* || true
+          sudo rm -rf ~/Library/Developer/CoreSimulator/Caches/* || true
+          sudo rm -rf ~/Library/Developer/Xcode/*DeviceSupport/* || true
+          # Keep the active Xcode, drop the rest (each ~15 GB).
+          SELECTED="$(xcode-select -p | sed 's|/Contents/Developer||')"
+          for x in /Applications/Xcode*.app; do
+            [ "$x" != "$SELECTED" ] && sudo rm -rf "$x" || true
+          done
+          echo "=== after ==="; df -h /
+
       - name: Detect package directory
         id: detect-pkgdir
         run: |
