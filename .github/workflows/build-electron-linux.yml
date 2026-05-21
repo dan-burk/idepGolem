@@ -112,6 +112,20 @@ jobs:
             npm install -D electron-builder@26.8.2
           fi
 
+      # The git tag is the single source of truth for the release version.
+      # electron-builder's ${version} token and Electron's app.getVersion()
+      # both read package.json's "version" field — NOT the git tag. Sync it
+      # from the tag here so release artifacts are named correctly and the
+      # in-app updater doesn't nag about a version the user already has.
+      - name: Sync package.json version to git tag
+        if: startsWith(github.ref, 'refs/tags/v')
+        working-directory: ${{ env.PACKAGE_DIR }}
+        run: |
+          set -euxo pipefail
+          VER="${GITHUB_REF_NAME#v}"
+          npm version "$VER" --no-git-tag-version --allow-same-version
+          echo "package.json version set to $VER"
+
       # Write OAuth config from GitHub Actions secrets so it ships in the installer.
       - name: Write electron/.env from secrets
         working-directory: ${{ env.PACKAGE_DIR }}

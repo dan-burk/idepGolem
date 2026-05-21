@@ -113,6 +113,20 @@ jobs:
             npm install -D electron-builder@26.8.2
           fi
 
+      # The git tag is the single source of truth for the release version.
+      # electron-builder's ${version} token and Electron's app.getVersion()
+      # both read package.json's "version" field — NOT the git tag. Sync it
+      # from the tag here so release artifacts are named correctly and the
+      # in-app updater doesn't nag about a version the user already has.
+      - name: Sync package.json version to git tag
+        if: startsWith(github.ref, 'refs/tags/v')
+        working-directory: ${{ env.PACKAGE_DIR }}
+        run: |
+          set -euxo pipefail
+          VER="${GITHUB_REF_NAME#v}"
+          npm version "$VER" --no-git-tag-version --allow-same-version
+          echo "package.json version set to $VER"
+
       # Write OAuth config from GitHub Actions secrets so it ships in the installer.
       - name: Write electron/.env from secrets
         working-directory: ${{ env.PACKAGE_DIR }}
@@ -399,6 +413,9 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
-      # No "Publish to GitHub Release" step: the Mac dmg exceeds GitHub's
-      # 2 GiB asset limit. Mac builds, uploads here as an artifact, and is
-      # hosted off-GitHub. See auth-pricing-setup/roadmap.md.
+      - name: Publish to GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ env.PACKAGE_DIR }}/dist/*.dmg
+          fail_on_unmatched_files: true
