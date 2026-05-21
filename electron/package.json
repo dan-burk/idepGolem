@@ -49,9 +49,7 @@
       "preload/**",
       "package.json",
       "node_modules/**",
-      "data/**",
-      "runtime/**",
-      "app/**"
+      "data/**"
     ],
     "extraResources": [
       { "from": "resources", "to": "." },
