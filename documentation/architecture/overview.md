@@ -127,7 +127,9 @@ Before the analysis app starts, the desktop shell proves two things:
 
 2. **That the user is licensed** — the shell calls iDEP's **`/entitlement`**
    cloud function, which checks the user and returns a signed **entitlement
-   JWT**. The function signs it with a private key kept in Google **Secret
+   JWT**. ⚠️ That function is **not in this repo** — it lives in a separate
+   repo, `idep-functions`, and deploys to Google Cloud. The auth system spans
+   both repos; see [`auth-and-entitlement.md`](auth-and-entitlement.md). The function signs it with a private key kept in Google **Secret
    Manager**; the shell verifies the signature with the matching public key.
 
 The verified entitlement is cached locally with Electron's `safeStorage` (OS-

@@ -13,6 +13,31 @@ open.
 
 ---
 
+## ⚠️ Where the code lives — this system spans TWO repos
+
+The auth system is **not contained in this repository.** It is split across two
+GitHub repos — you cannot fully understand or safely change it from `idepGolem`
+alone:
+
+| Repo | Holds | Deploys to |
+|------|-------|------------|
+| **`idepGolem`** (this repo) | The **client** side: Electron auth code (`electron/auth.js`, `entitlement.js`, `cache.js`, `hmac.js`), R-side verification (`R/auth_helpers.R`), and the embedded ES256 **public** key. | the desktop installers |
+| **`idep-functions`** (separate repo) | The **server** side: the `/entitlement` Cloud Function — verifies Google ID tokens, determines tier, and **signs** the entitlement JWT with the ES256 **private** key. | Google Cloud (Firebase Functions v2) |
+
+They are separate on purpose: the two halves deploy to entirely different places
+on different schedules (one inside desktop installers, one as a GCP server), so
+either can be redeployed without touching the other.
+
+The **contract** between them is deliberately small and stable: the function
+emits an ES256-signed entitlement JWT; the app verifies it with the embedded
+public key. As long as that JWT shape and the keypair are unchanged, the repos
+evolve independently — **but a change to the JWT format or the keypair requires
+a coordinated change in BOTH repos.**
+
+`idep-functions` carries its own `DOCUMENTATION.md` for the function's internals.
+
+---
+
 ## 1. Why this exists
 
 iDEP's business goal is a **Free / Pro / Enterprise** model. For that, the
