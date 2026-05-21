@@ -399,9 +399,6 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
-      - name: Publish to GitHub Release
-        if: startsWith(github.ref, 'refs/tags/v')
-        uses: softprops/action-gh-release@v2
-        with:
-          files: ${{ env.PACKAGE_DIR }}/dist/*.dmg
-          fail_on_unmatched_files: true
+      # No "Publish to GitHub Release" step: the Mac dmg exceeds GitHub's
+      # 2 GiB asset limit. Mac builds, uploads here as an artifact, and is
+      # hosted off-GitHub. See auth-pricing-setup/roadmap.md.
