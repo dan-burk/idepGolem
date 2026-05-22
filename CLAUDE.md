@@ -23,26 +23,19 @@ iDEP (Integrated Differential Expression & Pathway analysis) is a bioinformatics
 - **Linux R runtime + packages**: `cd electron/scripts && bash get_r_linux.sh`
 
 ### Releasing the Desktop App
-Desktop releases (Windows + Linux + macOS) are tag-driven. `electron/package.json`'s
-`version` field is the single source of truth; the release tag must match it.
+Replace `1.0.5` with the new version. The tag must match `package.json`.
 
 ```bash
 cd electron
-npm version patch        # bumps package.json, commits, and tags desktop-v<new>
-git push --follow-tags   # pushes commit + matching tag; triggers all 3 build workflows
+npm version 1.0.5 --no-git-tag-version
+cd ..
+git commit -am "Release desktop-v1.0.5"
+git tag desktop-v1.0.5
+git push && git push origin desktop-v1.0.5
 ```
 
-- Use `patch`/`minor`/`major`, or `npm version 1.2.3` for an explicit version.
-- Tags use the `desktop-v` prefix (configured in `electron/.npmrc`), keeping
-  desktop releases separate from the web app's `v2.x` tags. The
-  `build-electron-*` workflows trigger only on `desktop-v*`.
-- Each workflow verifies the tag matches `package.json` and **fails fast on a
-  mismatch**, then builds and publishes the installer to a GitHub Release.
-- Commit code changes first — `npm version` needs a clean tree and adds its
-  own bump commit on top.
-- `electron-builder`'s `${version}` and Electron's `app.getVersion()` both read
-  `package.json`; do not list `runtime/`/`app/` in both `build.files` and
-  `build.extraResources` (causes a duplicated, doubled-size bundle).
+Triggers the three `build-electron-*` workflows. Do not use bare `npm version
+patch` — it bumps `package.json` without reliably creating the tag.
 
 ### Docker (Alternative deployment)
 - **Run with Docker**: `docker run --pull always -d --name idep -p 3838:3838 gexijin/idep:latest`
