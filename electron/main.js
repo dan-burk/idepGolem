@@ -1,11 +1,11 @@
 // main.js
-const { app, BrowserWindow, dialog, Menu } = require('electron');
+const { app, BrowserWindow, dialog, Menu, shell } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const { spawn } = require('child_process');
 const net = require('net');
 const { checkForUpdates } = require('./updater');
-const { ensureEntitlement, setupShinyRequestAuth } = require('./auth-integration');
+const { ensureEntitlement, setupShinyRequestAuth, startProCheckout } = require('./auth-integration');
 const { getOrCreateHmacSecret } = require('./hmac');
 const { clearEntitlement } = require('./cache');
 // Node 22+ (bundled in Electron 39) provides global fetch natively
@@ -297,6 +297,44 @@ function buildAppMenu() {
   return Menu.buildFromTemplate(template);
 }
 
+// ---------- Pro upgrade dialog ----------
+// Shown when /entitlement denies a free user with code 'pro_required' — the
+// trial is over. Offers to open Stripe Checkout in the system browser.
+async function showProUpgradeDialog(err) {
+  const { response } = await dialog.showMessageBox({
+    type: 'info',
+    buttons: ['Upgrade to Pro', 'Quit'],
+    defaultId: 0,
+    cancelId: 1,
+    title: 'iDEP Trial Ended',
+    message: 'Your iDEP free trial has ended.',
+    detail: (err && err.userMessage) ||
+      'Upgrade to iDEP Pro to keep using the desktop app.',
+  });
+  if (response !== 0) return; // "Quit" chosen — nothing more to do.
+
+  // "Upgrade to Pro" chosen — open Stripe Checkout in the system browser.
+  try {
+    const checkoutUrl = await startProCheckout(err.idToken);
+    await shell.openExternal(checkoutUrl);
+    await dialog.showMessageBox({
+      type: 'info',
+      buttons: ['OK'],
+      title: 'Finish in your browser',
+      message: 'Complete your purchase in the browser window that opened.',
+      detail: 'Once payment is done, reopen iDEP — you will have Pro access.',
+    });
+  } catch (e) {
+    log('[checkout error]', e && e.message ? e.message : String(e));
+    try {
+      dialog.showErrorBox(
+        'Upgrade Error',
+        `Could not start checkout: ${e && e.message ? e.message : String(e)}`,
+      );
+    } catch {}
+  }
+}
+
 // ---------- bootstrap ----------
 async function createWindow() {
   const host = '127.0.0.1';
@@ -323,6 +361,13 @@ async function createWindow() {
       log('[auth]', `Signed in as ${identity.email} (tier=${identity.tier}, fromCache=${result.fromCache})`);
       hmacSecret = getOrCreateHmacSecret();
     } catch (err) {
+      // Trial over / Pro required → show the upgrade dialog instead of a
+      // raw error. Any other failure falls through to the generic box.
+      if (err && err.code === 'pro_required') {
+        log('[auth]', 'Entitlement denied (pro_required) — showing upgrade dialog');
+        await showProUpgradeDialog(err);
+        app.quit(); return;
+      }
       const msg = `Sign-in failed: ${err && err.message ? err.message : String(err)}\n\nYou can bypass auth temporarily by setting IDEP_AUTH_DISABLED=1.`;
       log('[auth error]', msg);
       try { dialog.showErrorBox('Sign-in Failed', msg); } catch {}

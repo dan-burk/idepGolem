@@ -27,3 +27,6 @@ question.
 | [0005](0005-one-gcp-project-per-product.md) | One GCP project per product |
 | [0006](0006-bundle-r-runtime-once.md) | Bundle the R runtime once, not twice |
 | [0007](0007-tag-driven-desktop-versioning.md) | Tag-driven desktop versioning (`desktop-v*`) |
+| [0008](0008-stripe-native-trials.md) | Stripe-native trials, not a hand-rolled trial clock |
+| [0009](0009-no-zero-dollar-free-subscription.md) | Free tier is the absence of a subscription, not a $0 one |
+| [0010](0010-launch-promo-date-not-coupon.md) | Launch-promo window is a date check, not a Stripe coupon |

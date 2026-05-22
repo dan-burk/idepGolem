@@ -145,7 +145,9 @@ launch, passes it to R via the `SHINY_HMAC_SECRET` environment variable, and
 `IDEP_AUTH_DISABLED=1` bypasses all of Layer 3 — an emergency/dev escape hatch.
 
 > Full detail — the 9-step flow, the two-JWT design, every component, deployed
-> coordinates — is in [`auth-and-entitlement.md`](auth-and-entitlement.md).
+> coordinates — is in [`auth-and-entitlement.md`](auth-and-entitlement.md). The
+> Stripe tiers, trials, and Pro checkout layered on top are in
+> [`monetization.md`](monetization.md).
 
 ---
 

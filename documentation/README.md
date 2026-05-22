@@ -19,6 +19,8 @@ If you are new to the codebase (or returning after a while), read in this order:
    while reading anything else.
 3. **[architecture/auth-and-entitlement.md](architecture/auth-and-entitlement.md)**
    — the auth/entitlement system in full, if that's your area.
+4. **[architecture/monetization.md](architecture/monetization.md)** — the
+   Stripe tiers, trials, and Pro checkout layered on top of auth.
 
 ## Folder map
 
@@ -39,7 +41,8 @@ The `architecture/` section is being written incrementally:
 | `architecture/overview.md` | ✅ written |
 | `glossary.md` | ✅ written |
 | `architecture/auth-and-entitlement.md` | ✅ written |
-| `decisions/` (ADRs 0001–0007) | ✅ written |
+| `architecture/monetization.md` — Stripe tiers, trials, Pro checkout | ✅ written |
+| `decisions/` (ADRs 0001–0010) | ✅ written |
 | `guides/gcp-auth-setup.md`, `guides/gcp-iam-cheatsheet.md` | ✅ written |
 | `architecture/shiny-app.md` — Golem structure, the 12 modules, reactive data flow | ⏳ to write |
 | `architecture/desktop-app.md` — Electron shell, `main.js` lifecycle, R runtime bundling | ⏳ to write |
@@ -53,8 +56,9 @@ Some material deliberately lives **outside** this repo:
   forward-looking planning — auth/pricing research, the live monetization
   **roadmap**, IAM notes. That's evolving strategy, not a description of the
   code, so it has its own home. A live checklist should have exactly one copy.
-- **The `idep-functions` repo** holds the `/entitlement` Cloud Function and its
-  own `DOCUMENTATION.md`.
+- **The `idep-functions` repo** holds the iDEP Cloud Functions (`/entitlement`
+  and `/createCheckoutSession`) with its own `DOCUMENTATION.md` and
+  `next-steps.md`.
 
 This folder describes what the iDEP code **is**; those describe what it might
 **become** and the server-side piece.

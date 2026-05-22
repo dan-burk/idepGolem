@@ -17,6 +17,10 @@ require('dotenv').config({ path: path.join(__dirname, '.env') });
 const GOOGLE_OAUTH_CLIENT_ID     = process.env.GOOGLE_OAUTH_CLIENT_ID;
 const GOOGLE_OAUTH_CLIENT_SECRET = process.env.GOOGLE_OAUTH_CLIENT_SECRET;
 const ENTITLEMENT_URL            = process.env.ENTITLEMENT_URL;
+// URL of the createCheckoutSession Cloud Function. Optional — only needed
+// when a blocked user clicks "Upgrade to Pro", so it is deliberately NOT in
+// the required-config check below.
+const CHECKOUT_URL               = process.env.CHECKOUT_URL;
 
 if (!GOOGLE_OAUTH_CLIENT_ID || !GOOGLE_OAUTH_CLIENT_SECRET || !ENTITLEMENT_URL) {
   throw new Error(
@@ -68,8 +72,22 @@ async function ensureEntitlement(onProgress) {
     headers: { 'Authorization': `Bearer ${tokens.id_token}` },
   });
   if (!res.ok) {
+    // Parse the function's JSON error body ({ error, message }) so callers
+    // can react to specific codes — e.g. 'pro_required' (trial ended).
     const text = await res.text();
-    throw new Error(`Entitlement HTTP ${res.status}: ${text}`);
+    let code = null;
+    let userMessage = null;
+    try {
+      const parsed = JSON.parse(text);
+      code = parsed.error || null;
+      userMessage = parsed.message || null;
+    } catch { /* body wasn't JSON — leave code/message null */ }
+    const err = new Error(`Entitlement HTTP ${res.status}: ${text}`);
+    err.code = code;               // e.g. 'pro_required', 'access_revoked'
+    err.userMessage = userMessage; // human-readable text from the function
+    err.httpStatus = res.status;
+    err.idToken = tokens.id_token; // lets the caller start a Pro checkout
+    throw err;
   }
   const { entitlement } = await res.json();
 
@@ -119,4 +137,29 @@ function setupShinyRequestAuth({ host, port, hmacSecret, identity, log }) {
   log('[shiny-auth] Authorization header injection active for', shinyURLPattern);
 }
 
-module.exports = { ensureEntitlement, setupShinyRequestAuth };
+/**
+ * Start a Stripe Checkout session for iDEP Pro and return its URL.
+ * The caller opens that URL in the user's system browser.
+ *
+ * @param {string} idToken - the Google ID token identifying the user
+ * @returns {Promise<string>} the Stripe Checkout URL
+ * @throws {Error} if CHECKOUT_URL is unset, the call fails, or no URL returns
+ */
+async function startProCheckout(idToken) {
+  if (!CHECKOUT_URL) {
+    throw new Error('CHECKOUT_URL is not set in electron/.env');
+  }
+  const res = await fetch(CHECKOUT_URL, {
+    method:  'POST',
+    headers: { 'Authorization': `Bearer ${idToken}` },
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`Checkout HTTP ${res.status}: ${text}`);
+  }
+  const { url } = await res.json();
+  if (!url) throw new Error('Checkout response contained no URL');
+  return url;
+}
+
+module.exports = { ensureEntitlement, setupShinyRequestAuth, startProCheckout };

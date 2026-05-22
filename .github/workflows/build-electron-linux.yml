@@ -140,6 +140,7 @@ jobs:
           GOOGLE_OAUTH_CLIENT_ID=${{ secrets.GOOGLE_OAUTH_CLIENT_ID }}
           GOOGLE_OAUTH_CLIENT_SECRET=${{ secrets.GOOGLE_OAUTH_CLIENT_SECRET }}
           ENTITLEMENT_URL=${{ secrets.ENTITLEMENT_URL }}
+          CHECKOUT_URL=${{ secrets.CHECKOUT_URL }}
           EOF
 
       - name: Setup R

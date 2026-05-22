@@ -5,8 +5,9 @@ before the analysis app starts.
 
 > Status (May 2026): the identity + entitlement plumbing is complete and
 > shipping in the Windows/Linux/macOS installers. The monetization layer on top
-> of it (Stripe tiers, Pro feature-gating) is **not** built yet — see
-> [§6](#6-current-state--whats-left).
+> of it (Stripe tiers, trials, Pro checkout) is now built **server-side** —
+> see [`monetization.md`](monetization.md) — but is not yet deployed, and the
+> desktop-app and R-side feature-gating remain. See [§6](#6-current-state--whats-left).
 
 New to the terms here (JWT, PKCE, ES256…)? Keep [`../glossary.md`](../glossary.md)
 open.
@@ -85,7 +86,7 @@ On app launch:
 
 [6] Electron POSTs the Google id_token to the /entitlement Cloud Function:
       - the function verifies the id_token against Google's JWKS
-      - the function determines tier  (v1: hardcoded "free"; later: Stripe)
+      - the function determines tier from Stripe (see monetization.md)
       - the function signs an entitlement JWT with the ES256 PRIVATE key
       - Electron verifies that JWT with the embedded ES256 PUBLIC key
       - Electron caches it, encrypted, via safeStorage
@@ -165,8 +166,9 @@ before the app drops them to Free — a standard offline-licensing pattern. See
   `https://entitlement-auzgq7lgsq-uc.a.run.app`.
 - Receives a Google ID token → verifies it against Google's JWKS → determines
   tier → signs an entitlement JWT (`jose`, ES256) with the Secret Manager key.
-- **v1 returns a hardcoded `tier: "free"`** — the Stripe lookup is the main
-  unbuilt piece.
+- Determines tier from Stripe — trials, subscriptions — see
+  [`monetization.md`](monetization.md). The repo also adds a
+  `/createCheckoutSession` function for buying Pro.
 - Lives in its own repo with its own `DOCUMENTATION.md`.
 
 ### Electron side — repo `idepGolem`, `electron/` folder
@@ -220,8 +222,9 @@ three platforms; Sign Out; auto-update notification.
 2. Decide **what "Pro" means** — which features are Free vs Pro. A product
    decision; blocks the rest.
 3. Create the iDEP **Stripe** account + products + price IDs.
-4. Replace the hardcoded `tier: "free"` in `/entitlement` with a real Stripe
-   lookup by verified email.
+4. **Deploy** the monetization layer — the Stripe tier lookup and Pro checkout
+   are built in `idep-functions` but not yet deployed. State + checklist:
+   [`monetization.md`](monetization.md) §11.
 5. Wire `shiny_identity_from_session()` into `R/app_server.R` (one line).
 6. Gate Pro features in the R UI off `session$userData$identity$tier`.
 
@@ -236,6 +239,8 @@ roadmap tracks what's *next*.
 ## See also
 
 - [`overview.md`](overview.md) — where this fits in the whole system.
+- [`monetization.md`](monetization.md) — the Stripe tiers, trials, and Pro
+  checkout that sit on top of this layer.
 - [`../decisions/`](../decisions/) — the *why* behind each design choice.
 - [`../guides/gcp-auth-setup.md`](../guides/gcp-auth-setup.md) — recreating the
   GCP backend.
