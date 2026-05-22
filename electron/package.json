@@ -1,17 +1,17 @@
 {
   "name": "idepGolem",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "description": "Desktop App for iDEP",
   "private": true,
   "main": "main.js",
   "author": {
     "name": "Xijin Ge",
     "email": "gexijin@gmail.com"
-  },  
+  },
   "repository": {
     "type": "git",
     "url": "https://github.com/dan-burk/idepGolem.git"
-  },  
+  },
   "license": "CC-BY-NC-3.0",
   "scripts": {
     "start": "electron .",
@@ -52,22 +52,40 @@
       "data/**"
     ],
     "extraResources": [
-      { "from": "resources", "to": "." },
-      { "from": "runtime", "to": "runtime" },
-      { "from": "app", "to": "app" }
+      {
+        "from": "resources",
+        "to": "."
+      },
+      {
+        "from": "runtime",
+        "to": "runtime"
+      },
+      {
+        "from": "app",
+        "to": "app"
+      }
     ],
     "win": {
-      "target": [{ "target": "nsis", "arch": ["x64"] }],
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
       "artifactName": "${productName}-${version}-win-${arch}.${ext}"
     },
     "mac": {
       "category": "public.app-category.education",
-      "target": [ "dmg" ],
+      "target": [
+        "dmg"
+      ],
       "icon": "build/icon-mac.png",
       "artifactName": "${productName}-${version}-mac-${arch}.${ext}",
       "hardenedRuntime": true,
       "gatekeeperAssess": false,
-      "entitlements": "entitlements.mac.plist",   
+      "entitlements": "entitlements.mac.plist",
       "notarize": false,
       "signIgnore": [
         ".*R\\.framework/Resources/library/.*/help(/.*)?",
@@ -76,7 +94,7 @@
         ".*R\\.framework/Resources/library/.*/examples(/.*)?",
         ".*R\\.framework/Resources/library/.*/R(/.*)?",
         ".*R\\.framework/Resources/library/.*/data(/.*)?"
-      ]      
+      ]
     },
     "linux": {
       "target": [
@@ -86,7 +104,6 @@
       "artifactName": "idep-${version}-linux-${arch}.${ext}",
       "maintainer": "Xijin Ge <gexijin@gmail.com>"
     },
-    
     "nsis": {
       "oneClick": true
     }
