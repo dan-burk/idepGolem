@@ -21,8 +21,10 @@ CANDIDATES=(
   "https://cdn.posit.co/r/ubuntu-2004/pkgs/r-${VER}_1_amd64.deb"
 )
 
-OUTDIR="${SCRIPT_DIR}/r-linux"
-RDEST="${OUTDIR}/R"   # <--- this is what build-electron.yml expects
+# Stage R at the production layout — matches main.js getRuntime()
+# (path.join(rp, 'runtime', 'R.linux')) and build-electron-linux.yml.
+ELECTRON_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
+RDEST="${ELECTRON_DIR}/runtime/R.linux"
 
 TMP="$(mktemp -d)"
 cleanup(){ rm -rf "$TMP"; }
@@ -57,7 +59,7 @@ RHOME="$(dirname "$(dirname "${RHOME}")")"   # strip bin/Rscript -> R home
 
 echo "Copying R runtime to ${RDEST} ..."
 rm -rf "${RDEST}"
-mkdir -p "${OUTDIR}"
+mkdir -p "$(dirname "${RDEST}")"
 cp -a "${RHOME}" "${RDEST}"
 
 # Fix hardcoded paths and replace Rscript ELF with a portable wrapper.
@@ -69,33 +71,32 @@ echo "R version:"
 ${RSCRIPT} -e 'cat(R.version.string, "\n")'
 echo "✅ Linux R runtime ready at: ${RDEST}"
 
-# ==================== System Dependencies ====================
+# ==================== System Dependencies (dev-light) ====================
+# Minimal build deps for shiny + golem only. Production CI installs a
+# much larger set for the full Bioconductor stack.
 echo ""
-echo "==================== Installing system build dependencies ===================="
+echo "==================== Installing system build dependencies (dev-light) ===================="
 
 sudo apt-get update -qq
 sudo apt-get install -y --no-install-recommends \
-  build-essential cmake gfortran libcurl4-openssl-dev libssl-dev libxml2-dev \
-  libfontconfig1-dev libharfbuzz-dev libfribidi-dev libfreetype6-dev \
-  libpng-dev libtiff5-dev libjpeg-dev libgit2-dev libsodium-dev \
-  libcairo2-dev libglpk-dev libmagick++-6.q16-dev libproj-dev \
-  libhdf5-dev libblosc-dev
+  build-essential libcurl4-openssl-dev libssl-dev
 
-# ==================== Install R Packages ====================
+# ==================== Install dev-light R packages ====================
+# Just shiny + golem + idepGolemDev — enough to run the diagnostic Shiny app.
+# Production (build-electron-linux.yml) uses install_packages.R for the
+# full ~355-package runtime; this dev script deliberately does not.
 echo ""
-echo "==================== Installing R packages via PPM snapshot ===================="
+echo "==================== Installing dev-light packages (shiny + golem + idepGolemDev) ===================="
 
 LIB="${RDEST}/library"
+DEV_PKG="${ELECTRON_DIR}/idepGolemDev"
 
-# Ubuntu puts HDF5 headers in /usr/include/hdf5/serial/ instead of the
-# standard /usr/include/.  rhdf5filters needs this to find H5PLextern.h.
-export C_INCLUDE_PATH="/usr/include/hdf5/serial${C_INCLUDE_PATH:+:$C_INCLUDE_PATH}"
-export CPATH="/usr/include/hdf5/serial${CPATH:+:$CPATH}"
-export LIBRARY_PATH="/usr/lib/x86_64-linux-gnu/hdf5/serial${LIBRARY_PATH:+:$LIBRARY_PATH}"
-
-echo "Library  : ${LIB}"
+echo "Library      : ${LIB}"
+echo "idepGolemDev : ${DEV_PKG}"
 echo ""
 
-${RSCRIPT} --no-save --file="${SCRIPT_DIR}/install_packages.R" --args "${LIB}"
+${RSCRIPT} -e "install.packages(c('shiny','golem'), lib='${LIB}', repos='https://cloud.r-project.org')"
 
-echo "✅ R packages installed"
+"${RDEST}/bin/R" CMD INSTALL --library="${LIB}" "${DEV_PKG}"
+
+echo "✅ dev-light packages installed (shiny + golem + idepGolemDev)"

@@ -1,0 +1,15 @@
+Package: idepGolemDev
+Title: iDEP Electron Shell Diagnostic
+Version: 0.0.0.9000
+Authors@R: person("iDEP", role = c("aut", "cre"), email = "dev@idep.local")
+Description: A minimal Golem-shaped Shiny app used to exercise the iDEP
+    Electron shell end to end (R spawn, HMAC handshake, env-var passing,
+    port detection, window load) without requiring the full ~355-package
+    iDEP runtime. Intended for local Electron development only — not
+    shipped to end users.
+License: CC-BY-NC-3.0
+Encoding: UTF-8
+Imports:
+    golem,
+    shiny
+RoxygenNote: 7.3.0

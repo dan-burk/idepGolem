@@ -174,6 +174,32 @@ rmarkdown::render(
 ```
 `report_params` is included in every `.RData` download and mirrors the `params` object the Shiny app sends to the report renderer, so the resulting HTML will match what you obtained in the Prep tab.
 
+## Electron Desktop App: Dev Mode
+
+Iterate on the Electron shell (window, splash, auth, R spawn, HMAC) without
+installing the full ~355-package iDEP runtime.
+
+| Command | Loads | Setup |
+|---|---|---|
+| `npm start` | Real `idepGolem` package — full app | Run the platform `get_r_*` script first |
+| `npm run dev` | Lightweight `idepGolemDev` diagnostic app | Same — but only ~200 MB of R deps installed |
+
+One-time setup from `electron/`:
+
+```bash
+# Windows
+powershell -ExecutionPolicy Bypass -File scripts\get_r_windows.ps1
+# Linux
+bash scripts/get_r_linux.sh
+# macOS
+bash scripts/get_r_mac.sh
+
+npm install
+npm run dev    # diagnostic page in seconds
+```
+
+Full guide: [`documentation/guides/electron-dev-mode.md`](documentation/guides/electron-dev-mode.md).
+
 ## Desktop App Release Lifecycle
 
 Desktop builds (Windows, Linux, macOS) are released by pushing a git tag with

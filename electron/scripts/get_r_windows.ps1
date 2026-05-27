@@ -17,12 +17,11 @@ if (-not $Rver -or $Rver -eq "") { $Rver = "4.5.1" }   # default version
 
 Write-Host "Using R version: $Rver"
 
-# runtime destination (flat layout)
-# script is run from electron/scripts so ../runtime/win/R is the target
+# runtime destination — matches the production layout in main.js getRuntime()
+# (path.join(rp, 'runtime', 'R.win')) and the Windows CI workflow's robocopy target.
 $repoRoot = Resolve-Path ".." | Select-Object -ExpandProperty Path
-$destWin  = Join-Path $repoRoot "runtime\win"
-$destR    = Join-Path $destWin  "R"
-New-Item -ItemType Directory -Force -Path $destWin | Out-Null
+$destR    = Join-Path $repoRoot "runtime\R.win"
+New-Item -ItemType Directory -Force -Path $destR | Out-Null
 
 # Temp working dir
 $tmp = Join-Path $env:TEMP ("rwin_" + [Guid]::NewGuid())
@@ -91,31 +90,35 @@ try {
 
   Write-Host "✅ Windows R runtime ready under $destR"
 
-  # ==================== Install R Packages ====================
+  # ==================== Install dev-light R packages ====================
+  # Just shiny + golem + idepGolemDev — enough to run the diagnostic Shiny app.
+  # Production (build-electron-windows.yml) uses install_packages.R for the
+  # full ~355-package runtime; this dev script deliberately does not.
   Write-Host ""
-  Write-Host "==================== Installing R packages via PPM snapshot ===================="
+  Write-Host "==================== Installing dev-light packages (shiny + golem + idepGolemDev) ===================="
 
-  $lib = Join-Path $destR "library"
-  # Use forward slashes in paths for R compatibility
+  $lib  = Join-Path $destR "library"
   $libR = $lib -replace '\\', '/'
+  $devPkg = Join-Path $repoRoot "idepGolemDev"
+  $Rexe   = Join-Path $destR "bin\R.exe"
 
-  $installScript = Join-Path $PSScriptRoot "install_packages.R"
-  Write-Host "Library  : $lib"
+  Write-Host "Library      : $lib"
+  Write-Host "idepGolemDev : $devPkg"
   Write-Host ""
 
-  Write-Host "Running install_packages.R - this will take a while ..."
-  # Temporarily allow stderr (R/BiocManager print warnings there) so
-  # PowerShell doesn't treat them as fatal errors.
   $savedPref = $ErrorActionPreference
   $ErrorActionPreference = "Continue"
-  & $destRscript --no-save --no-restore $installScript $libR 2>&1 | Write-Host
+
+  & $destRscript -e "install.packages(c('shiny','golem'), lib='$libR', repos='https://cloud.r-project.org')" 2>&1 | Write-Host
+  if ($LASTEXITCODE -ne 0) { throw "Installing shiny/golem failed with exit code $LASTEXITCODE" }
+
+  & $Rexe CMD INSTALL --library="$lib" "$devPkg" 2>&1 | Write-Host
+  if ($LASTEXITCODE -ne 0) { throw "Installing idepGolemDev failed with exit code $LASTEXITCODE" }
+
   $ErrorActionPreference = $savedPref
-  if ($LASTEXITCODE -ne 0) { throw "install_packages.R failed with exit code $LASTEXITCODE" }
 
   Write-Host ""
-  $pkgCount = (Get-ChildItem -Directory -Path $lib).Count
-  Write-Host "$pkgCount packages installed in $lib"
-  Write-Host "✅ R packages installed"
+  Write-Host "✅ dev-light packages installed (shiny + golem + idepGolemDev)"
 }
 finally {
   if (Test-Path $tmp) {

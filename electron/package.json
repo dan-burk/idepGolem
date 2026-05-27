@@ -15,6 +15,7 @@
   "license": "CC-BY-NC-3.0",
   "scripts": {
     "start": "electron .",
+    "dev": "cross-env IDEP_APP=dev electron .",
     "dist": "electron-builder --publish=never"
   },
   "dependencies": {
@@ -26,7 +27,8 @@
   "devDependencies": {
     "electron": "39.8.4",
     "electron-builder": "^26.8.2",
-    "@electron/notarize": "^2.5.0"
+    "@electron/notarize": "^2.5.0",
+    "cross-env": "^7.0.3"
   },
   "build": {
     "appId": "com.idepgolem.app",

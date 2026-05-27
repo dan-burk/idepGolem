@@ -119,16 +119,23 @@ setwd(data_dir)
 ok <- TRUE
 startup_t0 <- Sys.time()
 
+# Pick which Shiny app to load.
+#   IDEP_APP=dev  → idepGolemDev (lightweight diagnostic; only installed by
+#                   the separate dev-light setup, not the production runtime).
+#   otherwise     → idepGolem (the real package shipped to end users).
+idep_app_pkg <- if (identical(Sys.getenv("IDEP_APP"), "dev")) "idepGolemDev" else "idepGolem"
+message("[bootstrap] App package: ", idep_app_pkg)
+
 tryCatch({
   pkg_t0 <- Sys.time()
-  if (!requireNamespace("idepGolem", quietly = TRUE)) {
-    stop("Package 'idepGolem' not found in vendored library: ", paste(.libPaths(), collapse = " | "))
+  if (!requireNamespace(idep_app_pkg, quietly = TRUE)) {
+    stop("Package '", idep_app_pkg, "' not found in vendored library: ", paste(.libPaths(), collapse = " | "))
   }
   pkg_t1 <- Sys.time()
   message("[bootstrap] Package load time: ", round(as.numeric(difftime(pkg_t1, pkg_t0, units = "secs")), 2), " s")
 
   app_t0 <- Sys.time()
-  app <- idepGolem::run_app()
+  app <- getNamespace(idep_app_pkg)$run_app()
   if (!inherits(app, "shiny.appobj")) stop("run_app() did not return a shiny.appobj")
   app_t1 <- Sys.time()
   message("[bootstrap] run_app() time: ", round(as.numeric(difftime(app_t1, app_t0, units = "secs")), 2), " s")

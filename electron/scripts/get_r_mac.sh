@@ -24,10 +24,11 @@ CANDIDATES=(
 )
 
 SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
-OUTDIR="${SCRIPT_DIR}/r-mac"
+ELECTRON_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
-RFRAMEWORK_DEST="${OUTDIR}/R.framework"
-RDEST="${OUTDIR}/R"   # <--- this is what build-electron.yml expects
+# Stage R.framework at the production layout — matches main.js getRuntime()
+# (path.join(rp, 'runtime', 'R.framework')) and build-electron-mac.yml.
+RFRAMEWORK_DEST="${ELECTRON_DIR}/runtime/R.framework"
 
 TMP="$(mktemp -d)"
 cleanup(){ rm -rf "$TMP"; }
@@ -59,58 +60,33 @@ if [[ -z "${RFW}" ]]; then
   exit 1
 fi
 
-echo "Copying R.framework to ${RFRAMEWORK_DEST} and flattening into ${RDEST} ..."
-rm -rf "${RFRAMEWORK_DEST}" "${RDEST}"
-mkdir -p "${OUTDIR}"
-
-# Keep the full framework (optional but nice to have)
+echo "Copying R.framework to ${RFRAMEWORK_DEST} ..."
+rm -rf "${RFRAMEWORK_DEST}"
+mkdir -p "$(dirname "${RFRAMEWORK_DEST}")"
 ditto "${RFW}" "${RFRAMEWORK_DEST}"
 
-# Flatten framework layout so we get r-mac/R/bin/R, etc.
-ditto "${RFRAMEWORK_DEST}/Resources" "${RDEST}"
-
 echo "Rscript version:"
-"${RDEST}/bin/Rscript" --version
-echo "✅ macOS R runtime ready at: ${RDEST}"
+"${RFRAMEWORK_DEST}/Resources/bin/Rscript" --version
+echo "✅ macOS R runtime ready at: ${RFRAMEWORK_DEST}"
 
-# ==================== Install R Packages ====================
+# ==================== Install dev-light R packages ====================
+# Just shiny + golem + idepGolemDev — enough to run the diagnostic Shiny app.
+# Production (build-electron-mac.yml) uses install_packages.R for the
+# full ~355-package runtime; this dev script deliberately does not.
 echo ""
-echo "==================== Installing R packages via renv ===================="
+echo "==================== Installing dev-light packages (shiny + golem + idepGolemDev) ===================="
 
-PROJ_ROOT="${SCRIPT_DIR}/../.."
-LOCKFILE="${PROJ_ROOT}/renv.lock"
-if [[ ! -f "${LOCKFILE}" ]]; then
-  echo "ERROR: renv.lock not found at ${LOCKFILE}" >&2
-  exit 1
-fi
-LOCKFILE="$(cd "$(dirname "${LOCKFILE}")" && pwd)/$(basename "${LOCKFILE}")"
+RSCRIPT="${RFRAMEWORK_DEST}/Resources/bin/Rscript"
+RBIN="${RFRAMEWORK_DEST}/Resources/bin/R"
+LIB="${RFRAMEWORK_DEST}/Resources/library"
+DEV_PKG="${ELECTRON_DIR}/idepGolemDev"
 
-LIB="${RDEST}/library"
-
-echo "Lockfile : ${LOCKFILE}"
-echo "Library  : ${LIB}"
+echo "Library      : ${LIB}"
+echo "idepGolemDev : ${DEV_PKG}"
 echo ""
 
-# Install renv into the staged R
-echo "Installing renv ..."
-"${RDEST}/bin/Rscript" -e 'install.packages("renv", repos = "https://cloud.r-project.org", quiet = TRUE)'
+${RSCRIPT} -e "install.packages(c('shiny','golem'), lib='${LIB}', repos='https://cloud.r-project.org')"
 
-# Install BiocManager (renv needs it to resolve Bioconductor packages)
-echo "Installing BiocManager ..."
-"${RDEST}/bin/Rscript" -e 'install.packages("BiocManager", repos = "https://cloud.r-project.org", quiet = TRUE)'
+"${RBIN}" CMD INSTALL --library="${LIB}" "${DEV_PKG}"
 
-# Restore all packages from lockfile into the staged library
-echo "Running renv::restore() — this will take a while ..."
-"${RDEST}/bin/Rscript" -e "
-  options(warn = 1)
-  renv::restore(
-    lockfile = '${LOCKFILE}',
-    library  = '${LIB}',
-    prompt   = FALSE
-  )
-"
-
-echo ""
-echo "Installed packages:"
-"${RDEST}/bin/Rscript" -e "cat(length(list.dirs('${LIB}', recursive = FALSE)), 'packages in', '${LIB}', '\n')"
-echo "✅ R packages installed"
+echo "✅ dev-light packages installed (shiny + golem + idepGolemDev)"

@@ -29,8 +29,16 @@ If you are new to the codebase (or returning after a while), read in this order:
 | `architecture/` | How the system works. Evergreen — kept accurate to the code. |
 | `glossary.md` | Definitions of concepts and jargon. |
 | `decisions/` | Architecture Decision Records — *why* each significant choice was made. Append-only. |
-| `guides/` | Practical how-to documents (building, packaging, GCP setup). |
+| `guides/` | Practical how-to documents (building, packaging, GCP setup, dev mode). |
 | `notes/` | Historical writeups, bug reports, and one-off implementation summaries. Point-in-time — **not** guaranteed current. |
+
+## Practical how-tos
+
+- [`guides/electron-dev-mode.md`](guides/electron-dev-mode.md) — `npm start` vs `npm run dev`, the dev-light setup, the diagnostic `idepGolemDev` app.
+- [`guides/electron-packaging-guide.md`](guides/electron-packaging-guide.md) — packaging the desktop installers.
+- [`guides/electron-build-linux.md`](guides/electron-build-linux.md) — Linux-specific build notes.
+- [`guides/gcp-auth-setup.md`](guides/gcp-auth-setup.md) — Google Cloud auth + entitlement setup.
+- [`guides/gcp-iam-cheatsheet.md`](guides/gcp-iam-cheatsheet.md) — IAM quick reference.
 
 ## Status
 
