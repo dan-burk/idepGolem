@@ -85,8 +85,14 @@ echo "Library      : ${LIB}"
 echo "idepGolemDev : ${DEV_PKG}"
 echo ""
 
-${RSCRIPT} -e "install.packages(c('shiny','golem'), lib='${LIB}', repos='https://cloud.r-project.org')"
+# Suppress the developer's user library (default ~/Library/R/x.y/library)
+# so install.packages doesn't skip transitives it considers "already installed"
+# there — which would leave the bundled runtime missing rlang/cli/glue/etc. at
+# app launch. R treats the literal string "NULL" as "no user library".
+# --vanilla alone is not enough because R sets the default R_LIBS_USER path
+# even when .Renviron is suppressed.
+R_LIBS_USER=NULL ${RSCRIPT} --vanilla -e "install.packages(c('shiny','golem'), lib='${LIB}', repos='https://cloud.r-project.org')"
 
-"${RBIN}" CMD INSTALL --library="${LIB}" "${DEV_PKG}"
+R_LIBS_USER=NULL "${RBIN}" --vanilla CMD INSTALL --library="${LIB}" "${DEV_PKG}"
 
 echo "✅ dev-light packages installed (shiny + golem + idepGolemDev)"

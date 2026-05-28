@@ -1,0 +1,3 @@
+FATAL: Package 'idepGolemDev' not found in vendored library: C:/Users/dburk/Documents/GitHub/idepGolem/electron/runtime/win/R/library 
+FATAL: there is no package called 'rlang' 
+FATAL: there is no package called 'rlang' 

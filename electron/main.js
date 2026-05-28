@@ -10,8 +10,7 @@ const { getOrCreateHmacSecret } = require('./hmac');
 const { clearEntitlement } = require('./cache');
 // Node 22+ (bundled in Electron 39) provides global fetch natively
 
-// Set IDEP_AUTH_DISABLED=1 to skip OAuth + HMAC entirely (emergency fallback).
-const AUTH_DISABLED = process.env.IDEP_AUTH_DISABLED === '1';
+const DEV_MODE = process.env.IDEP_APP === 'dev';
 
 let childProc = null;
 
@@ -287,7 +286,7 @@ function buildAppMenu() {
   ];
 
   // No account to sign out of when auth is bypassed.
-  if (!AUTH_DISABLED) {
+  if (!DEV_MODE) {
     template.push({
       label: 'Account',
       submenu: [{ label: 'Sign Out', click: () => signOutFlow() }],
@@ -351,10 +350,10 @@ async function createWindow() {
 
   // --- Auth gate (Phase 2c) ---
   // Run OAuth + entitlement check before spawning R. On failure, show a
-  // dialog and quit. Set IDEP_AUTH_DISABLED=1 in the env to bypass entirely.
+  // dialog and quit. Bypassed automatically when IDEP_APP=dev (npm run dev).
   let identity = null;
   let hmacSecret = null;
-  if (!AUTH_DISABLED) {
+  if (!DEV_MODE) {
     try {
       const result = await ensureEntitlement((pct, text) => setSplashProgress(pct, text));
       identity = result.identity;
@@ -368,13 +367,13 @@ async function createWindow() {
         await showProUpgradeDialog(err);
         app.quit(); return;
       }
-      const msg = `Sign-in failed: ${err && err.message ? err.message : String(err)}\n\nYou can bypass auth temporarily by setting IDEP_AUTH_DISABLED=1.`;
+      const msg = `Sign-in failed: ${err && err.message ? err.message : String(err)}`;
       log('[auth error]', msg);
       try { dialog.showErrorBox('Sign-in Failed', msg); } catch {}
       app.quit(); return;
     }
   } else {
-    log('[auth] DISABLED via IDEP_AUTH_DISABLED — skipping sign-in');
+    log('[auth] Skipped — running in dev mode (IDEP_APP=dev)');
   }
 
   setSplashProgress(0.1, 'Preparing data directory…');
@@ -396,13 +395,15 @@ async function createWindow() {
   else DATA_PARENT = path.join(app.getPath('userData'), 'idep');
   try { fs.mkdirSync(DATA_PARENT, { recursive: true }); } catch {}
 
-  // sanity
-  const appR = path.join(APP_DIR, 'app.R');
-  if (!fs.existsSync(appR)) {
-    const msg = `Missing app/app.R.\nLooked at: ${appR}\nLog: ${LOG_FILE}`;
-    log('[FATAL]', msg);
-    try { dialog.showErrorBox('Missing app.R', msg); } catch {}
-    app.quit(); return;
+  // sanity — dev mode loads the package directly, so app.R isn't needed
+  if (!DEV_MODE) {
+    const appR = path.join(APP_DIR, 'app.R');
+    if (!fs.existsSync(appR)) {
+      const msg = `Missing app/app.R.\nLooked at: ${appR}\nLog: ${LOG_FILE}`;
+      log('[FATAL]', msg);
+      try { dialog.showErrorBox('Missing app.R', msg); } catch {}
+      app.quit(); return;
+    }
   }
 
   // runtime
@@ -549,7 +550,7 @@ async function createWindow() {
 
   // Phase 2d: inject HMAC-signed JWT on every request to the Shiny URL.
   // Done before loadURL so the very first request (HTML fetch) is authenticated.
-  if (!AUTH_DISABLED && hmacSecret && identity) {
+  if (!DEV_MODE && hmacSecret && identity) {
     setupShinyRequestAuth({ host, port: targetPort, hmacSecret, identity, log });
   }
 

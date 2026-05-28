@@ -19,8 +19,10 @@ Write-Host "Using R version: $Rver"
 
 # runtime destination — matches the production layout in main.js getRuntime()
 # (path.join(rp, 'runtime', 'R.win')) and the Windows CI workflow's robocopy target.
-$repoRoot = Resolve-Path ".." | Select-Object -ExpandProperty Path
-$destR    = Join-Path $repoRoot "runtime\R.win"
+# Resolve paths relative to the script's own location, not cwd, so the script
+# works no matter where it's invoked from.
+$electronDir = Split-Path -Parent $scriptDir
+$destR       = Join-Path $electronDir "runtime\R.win"
 New-Item -ItemType Directory -Force -Path $destR | Out-Null
 
 # Temp working dir
@@ -99,7 +101,7 @@ try {
 
   $lib  = Join-Path $destR "library"
   $libR = $lib -replace '\\', '/'
-  $devPkg = Join-Path $repoRoot "idepGolemDev"
+  $devPkg = Join-Path $electronDir "idepGolemDev"
   $Rexe   = Join-Path $destR "bin\R.exe"
 
   Write-Host "Library      : $lib"
@@ -109,11 +111,23 @@ try {
   $savedPref = $ErrorActionPreference
   $ErrorActionPreference = "Continue"
 
-  & $destRscript -e "install.packages(c('shiny','golem'), lib='$libR', repos='https://cloud.r-project.org')" 2>&1 | Write-Host
-  if ($LASTEXITCODE -ne 0) { throw "Installing shiny/golem failed with exit code $LASTEXITCODE" }
+  # Suppress the developer's user library (default %LOCALAPPDATA%\R\win-library\4.5)
+  # so install.packages doesn't skip transitives it considers "already installed"
+  # there — which would leave the bundled runtime missing rlang/cli/glue/etc. at
+  # app launch. R treats the literal string "NULL" as "no user library".
+  # --vanilla alone is not enough on Windows because R sets the default
+  # R_LIBS_USER path even when .Renviron is suppressed.
+  $savedRLibsUser = $env:R_LIBS_USER
+  $env:R_LIBS_USER = "NULL"
+  try {
+    & $destRscript --vanilla -e "install.packages(c('shiny','golem'), lib='$libR', repos='https://cloud.r-project.org')" 2>&1 | Write-Host
+    if ($LASTEXITCODE -ne 0) { throw "Installing shiny/golem failed with exit code $LASTEXITCODE" }
 
-  & $Rexe CMD INSTALL --library="$lib" "$devPkg" 2>&1 | Write-Host
-  if ($LASTEXITCODE -ne 0) { throw "Installing idepGolemDev failed with exit code $LASTEXITCODE" }
+    & $Rexe --vanilla CMD INSTALL --library="$lib" "$devPkg" 2>&1 | Write-Host
+    if ($LASTEXITCODE -ne 0) { throw "Installing idepGolemDev failed with exit code $LASTEXITCODE" }
+  } finally {
+    $env:R_LIBS_USER = $savedRLibsUser
+  }
 
   $ErrorActionPreference = $savedPref
 

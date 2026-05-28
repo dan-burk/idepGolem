@@ -22,7 +22,9 @@ const ENTITLEMENT_URL            = process.env.ENTITLEMENT_URL;
 // the required-config check below.
 const CHECKOUT_URL               = process.env.CHECKOUT_URL;
 
-if (!GOOGLE_OAUTH_CLIENT_ID || !GOOGLE_OAUTH_CLIENT_SECRET || !ENTITLEMENT_URL) {
+const DEV_MODE = process.env.IDEP_APP === 'dev';
+
+if (!DEV_MODE && (!GOOGLE_OAUTH_CLIENT_ID || !GOOGLE_OAUTH_CLIENT_SECRET || !ENTITLEMENT_URL)) {
   throw new Error(
     'Missing OAuth config. Copy electron/.env.example to electron/.env ' +
     'and fill in your Google OAuth credentials.'
