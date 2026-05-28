@@ -92,12 +92,12 @@ try {
 
   Write-Host "✅ Windows R runtime ready under $destR"
 
-  # ==================== Install dev-light R packages ====================
+  # ==================== Install dev R packages ====================
   # Just shiny + golem + idepGolemDev — enough to run the diagnostic Shiny app.
   # Production (build-electron-windows.yml) uses install_packages.R for the
   # full ~355-package runtime; this dev script deliberately does not.
   Write-Host ""
-  Write-Host "==================== Installing dev-light packages (shiny + golem + idepGolemDev) ===================="
+  Write-Host "==================== Installing dev packages (shiny + golem + idepGolemDev) ===================="
 
   $lib  = Join-Path $destR "library"
   $libR = $lib -replace '\\', '/'
@@ -132,7 +132,7 @@ try {
   $ErrorActionPreference = $savedPref
 
   Write-Host ""
-  Write-Host "✅ dev-light packages installed (shiny + golem + idepGolemDev)"
+  Write-Host "✅ dev packages installed (shiny + golem + idepGolemDev)"
 }
 finally {
   if (Test-Path $tmp) {

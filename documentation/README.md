@@ -34,7 +34,7 @@ If you are new to the codebase (or returning after a while), read in this order:
 
 ## Practical how-tos
 
-- [`guides/electron-dev-mode.md`](guides/electron-dev-mode.md) — `npm start` vs `npm run dev`, the dev-light setup, the diagnostic `idepGolemDev` app.
+- [`guides/electron-dev-mode.md`](guides/electron-dev-mode.md) — `npm start` vs `npm run dev`, the dev setup, the diagnostic `idepGolemDev` app.
 - [`guides/electron-packaging-guide.md`](guides/electron-packaging-guide.md) — packaging the desktop installers.
 - [`guides/electron-build-linux.md`](guides/electron-build-linux.md) — Linux-specific build notes.
 - [`guides/gcp-auth-setup.md`](guides/gcp-auth-setup.md) — Google Cloud auth + entitlement setup.

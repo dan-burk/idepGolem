@@ -1,7 +1,9 @@
 # Finding bloat in `getRuntime()` — read the code, beat a confession out of it
 
 **Date:** 2026-05-27
-**Status:** Finding documented; proposed fix not yet applied.
+**Status:** Fix applied 2026-05-28 after the new dev scripts were verified on
+a separate development machine. See "Proposed fix" section below for the
+before/after diffs that landed.
 
 ## How this finding happened
 
@@ -194,15 +196,15 @@ After:
 const R_ROOT = path.join(rp, 'runtime', 'R.linux');
 ```
 
-### Why this fix is not applied yet
+### Applied (2026-05-28)
 
-The script alignment that *enables* this collapse just landed in the
-same change set as this finding. Until at least one CI build + actual
-install confirms production still finds R at the documented path
-(especially on macOS, where framework layouts are most sensitive), the
-multi-candidate fallback is harmless insurance. The right time to
-remove it is after the first verified packaged install on the new dev
-scripts. Until then: documented, scoped, ready to apply.
+The dev scripts were verified end-to-end on a separate development
+machine, satisfying the "wait for a real install to confirm the
+documented path" caveat. The collapse landed in the same change set
+that introduces this note's status update. Linux also gained the same
+"fail loudly with a dialog if bundled R is missing" pattern that
+Windows and macOS already had — replacing the silent fallback to
+system `Rscript`, which would mask a missing bundle.
 
 ---
 

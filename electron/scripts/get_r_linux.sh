@@ -71,22 +71,22 @@ echo "R version:"
 ${RSCRIPT} -e 'cat(R.version.string, "\n")'
 echo "✅ Linux R runtime ready at: ${RDEST}"
 
-# ==================== System Dependencies (dev-light) ====================
+# ==================== System Dependencies (dev) ====================
 # Minimal build deps for shiny + golem only. Production CI installs a
 # much larger set for the full Bioconductor stack.
 echo ""
-echo "==================== Installing system build dependencies (dev-light) ===================="
+echo "==================== Installing system build dependencies (dev) ===================="
 
 sudo apt-get update -qq
 sudo apt-get install -y --no-install-recommends \
   build-essential libcurl4-openssl-dev libssl-dev
 
-# ==================== Install dev-light R packages ====================
+# ==================== Install dev R packages ====================
 # Just shiny + golem + idepGolemDev — enough to run the diagnostic Shiny app.
 # Production (build-electron-linux.yml) uses install_packages.R for the
 # full ~355-package runtime; this dev script deliberately does not.
 echo ""
-echo "==================== Installing dev-light packages (shiny + golem + idepGolemDev) ===================="
+echo "==================== Installing dev packages (shiny + golem + idepGolemDev) ===================="
 
 LIB="${RDEST}/library"
 DEV_PKG="${ELECTRON_DIR}/idepGolemDev"
@@ -105,4 +105,4 @@ R_LIBS_USER=NULL ${RSCRIPT} --vanilla -e "install.packages(c('shiny','golem'), l
 
 R_LIBS_USER=NULL "${RDEST}/bin/R" --vanilla CMD INSTALL --library="${LIB}" "${DEV_PKG}"
 
-echo "✅ dev-light packages installed (shiny + golem + idepGolemDev)"
+echo "✅ dev packages installed (shiny + golem + idepGolemDev)"

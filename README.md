@@ -182,7 +182,7 @@ installing the full ~355-package iDEP runtime.
 | Command | Loads | Setup |
 |---|---|---|
 | `npm start` | Real `idepGolem` package — full app | Run the platform `get_r_*` script first |
-| `npm run dev` | Lightweight `idepGolemDev` diagnostic app | Same — but only ~200 MB of R deps installed |
+| `npm run dev` | Diagnostic `idepGolemDev` app | Same — but only ~200 MB of R deps installed |
 
 One-time setup from `electron/`:
 

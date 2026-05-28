@@ -56,22 +56,11 @@ function getRuntime() {
   const rp = app.isPackaged ? process.resourcesPath : __dirname;
 
   if (process.platform === 'win32') {
-    const roots = [
-      path.join(rp, 'runtime', 'R.win'),
-      path.join(rp, 'R.win'),
-      path.join(rp, 'resources', 'R.win'),
-      path.join(rp, 'runtime', 'R-Portable'),
-      path.join(rp, 'R-Portable'),
-    ];
-    const R_ROOT = roots.find(fs.existsSync);
-    const binDir = R_ROOT ? path.join(R_ROOT, 'bin') : null;
-    const candidates = [
-      binDir && path.join(binDir, 'Rscript.exe'),
-      R_ROOT && path.join(R_ROOT, 'bin', 'x64', 'Rscript.exe'),
-    ].filter(Boolean);
-    const rscript = candidates.find(p => fs.existsSync(p));
-    if (!R_ROOT || !rscript) {
-      const msg = `Could not locate bundled Rscript.exe.\nresourcesPath: ${rp}\nChecked:\n${roots.join('\n')}\n`;
+    const R_ROOT = path.join(rp, 'runtime', 'R.win');
+    const binDir = path.join(R_ROOT, 'bin');
+    const rscript = path.join(binDir, 'Rscript.exe');
+    if (!fs.existsSync(rscript)) {
+      const msg = `Could not locate bundled Rscript.exe.\nresourcesPath: ${rp}\nExpected at: ${rscript}\n`;
       log('[FATAL]', msg);
       try { dialog.showErrorBox('Rscript.exe Not Found', msg + `\nLog: ${LOG_FILE}`); } catch {}
       return null;
@@ -93,14 +82,9 @@ function getRuntime() {
   }
 
   if (process.platform === 'darwin') {
-    const candidates = [
-      path.join(rp, 'runtime', 'R.framework', 'Resources', 'bin', 'Rscript'),
-      path.join(rp, 'R.framework', 'Resources', 'bin', 'Rscript'),
-      path.join(rp, 'resources', 'R.framework', 'Resources', 'bin', 'Rscript'),
-    ];
-    const rscript = candidates.find(fs.existsSync);
-    if (!rscript) {
-      log('[macOS] Rscript not found. Checked:\n' + candidates.join('\n'));
+    const rscript = path.join(rp, 'runtime', 'R.framework', 'Resources', 'bin', 'Rscript');
+    if (!fs.existsSync(rscript)) {
+      log('[macOS] Rscript not found at ' + rscript);
       try { dialog.showErrorBox('Rscript Not Found', 'Bundle R.framework under runtime/.\nSee log: ' + LOG_FILE); } catch {}
       return null;
     }
@@ -116,23 +100,21 @@ function getRuntime() {
   }
 
   // linux
-  const roots = [
-    path.join(rp, 'runtime', 'R.linux'),
-    path.join(rp, 'R.linux'),
-    path.join(rp, 'resources', 'R.linux'),
-  ];
-  const R_ROOT = roots.find(fs.existsSync);
-  const binDir = R_ROOT ? path.join(R_ROOT, 'bin') : null;
-const rscript = (binDir && fs.existsSync(path.join(binDir, 'Rscript')))
-  ? path.join(binDir, 'Rscript')
-  : 'Rscript';
+  const R_ROOT = path.join(rp, 'runtime', 'R.linux');
+  const binDir = path.join(R_ROOT, 'bin');
+  const rscript = path.join(binDir, 'Rscript');
+  if (!fs.existsSync(rscript)) {
+    log('[linux] Rscript not found at ' + rscript);
+    try { dialog.showErrorBox('Rscript Not Found', 'Bundle R under runtime/R.linux/.\nSee log: ' + LOG_FILE); } catch {}
+    return null;
+  }
   return {
     rscript,
-    env: R_ROOT ? {
+    env: {
       R_HOME: R_ROOT,
       LD_LIBRARY_PATH: [path.join(R_ROOT, 'lib'), process.env.LD_LIBRARY_PATH || ''].filter(Boolean).join(':'),
       PATH: [binDir, process.env.PATH || ''].filter(Boolean).join(':'),
-    } : {},
+    },
   };
 }
 

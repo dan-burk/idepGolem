@@ -69,12 +69,12 @@ echo "Rscript version:"
 "${RFRAMEWORK_DEST}/Resources/bin/Rscript" --version
 echo "✅ macOS R runtime ready at: ${RFRAMEWORK_DEST}"
 
-# ==================== Install dev-light R packages ====================
+# ==================== Install dev R packages ====================
 # Just shiny + golem + idepGolemDev — enough to run the diagnostic Shiny app.
 # Production (build-electron-mac.yml) uses install_packages.R for the
 # full ~355-package runtime; this dev script deliberately does not.
 echo ""
-echo "==================== Installing dev-light packages (shiny + golem + idepGolemDev) ===================="
+echo "==================== Installing dev packages (shiny + golem + idepGolemDev) ===================="
 
 RSCRIPT="${RFRAMEWORK_DEST}/Resources/bin/Rscript"
 RBIN="${RFRAMEWORK_DEST}/Resources/bin/R"
@@ -95,4 +95,4 @@ R_LIBS_USER=NULL ${RSCRIPT} --vanilla -e "install.packages(c('shiny','golem'), l
 
 R_LIBS_USER=NULL "${RBIN}" --vanilla CMD INSTALL --library="${LIB}" "${DEV_PKG}"
 
-echo "✅ dev-light packages installed (shiny + golem + idepGolemDev)"
+echo "✅ dev packages installed (shiny + golem + idepGolemDev)"
