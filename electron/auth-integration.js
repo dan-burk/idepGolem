@@ -35,47 +35,82 @@ if (!DEV_MODE && (!GOOGLE_OAUTH_CLIENT_ID || !GOOGLE_OAUTH_CLIENT_SECRET || !ENT
  * Ensure we have a usable entitlement before launching Shiny.
  * Tries cache first; if missing/expired, runs PKCE OAuth flow.
  *
+ * Returns a discriminated result instead of throwing for known outcomes:
+ *   success:        { ok: true,  entitlement, identity, fromCache }
+ *   trial ended:    { ok: false, reason: 'pro_required',   message, idToken }
+ *   access revoked: { ok: false, reason: 'access_revoked', message, idToken }
+ *   OAuth aborted:  { ok: false, reason: 'auth_failed',    message }
+ *   server down:    { ok: false, reason: 'network_error',  message }
+ *   other HTTP/5xx: { ok: false, reason: 'server_error',   message, httpStatus }
+ *
+ * Only programmer-error conditions (e.g. the missing-OAuth-config check above)
+ * throw; every response from the world is returned as one of the shapes above.
+ *
  * @param {function(number, string):void} onProgress - splash progress callback
- * @returns {Promise<{entitlement: string, identity: object, fromCache: boolean}>}
+ * @returns {Promise<object>} discriminated result (see shapes above)
  */
 async function ensureEntitlement(onProgress) {
   onProgress(0.05, 'Checking sign-in…');
 
-  // 1. Try cache
-  const cached = loadEntitlement();
-  if (cached) {
-    try {
+  // 1. Try cache. Any cache problem — unreadable file, corrupt data, bad
+  //    signature, or expired — is non-fatal: wipe and fall through to re-auth.
+  try {
+    const cached = loadEntitlement();
+    if (cached) {
       const claims = await verifyEntitlement(cached);
       const status = entitlementStatus(claims);
       if (status === 'valid' || status === 'grace') {
         onProgress(0.08, `Welcome back, ${claims.email}`);
-        return { entitlement: cached, identity: claims, fromCache: true };
+        return { ok: true, entitlement: cached, identity: claims, fromCache: true };
       }
       // Expired — fall through to re-auth
       clearEntitlement();
-    } catch {
-      // Cache corrupt or signature invalid — wipe and re-auth
-      clearEntitlement();
     }
+  } catch {
+    // Cache unreadable / corrupt / signature invalid — wipe and re-auth.
+    clearEntitlement();
   }
 
-  // 2. PKCE flow
+  // 2. PKCE flow. A rejection here means the OAuth/PKCE flow was aborted or
+  //    errored (user closed the browser, redirect failed, etc.) — a known
+  //    failure, returned rather than thrown.
   onProgress(0.08, 'Opening browser to sign in…');
-  const tokens = await runPKCEFlow({
-    clientId:       GOOGLE_OAUTH_CLIENT_ID,
-    clientSecret:   GOOGLE_OAUTH_CLIENT_SECRET,
-    openInBrowser:  (url) => shell.openExternal(url),
-  });
+  let tokens;
+  try {
+    tokens = await runPKCEFlow({
+      clientId:       GOOGLE_OAUTH_CLIENT_ID,
+      clientSecret:   GOOGLE_OAUTH_CLIENT_SECRET,
+      openInBrowser:  (url) => shell.openExternal(url),
+    });
+  } catch (err) {
+    return {
+      ok: false,
+      reason: 'auth_failed',
+      message: (err && err.message) || 'Sign-in was cancelled or failed.',
+    };
+  }
 
-  // 3. Exchange for entitlement
+  // 3. Exchange for entitlement. A thrown fetch means the endpoint was
+  //    unreachable (DNS, connection refused, timeout) — a network error,
+  //    distinct from the HTTP error responses handled just below.
   onProgress(0.12, 'Fetching entitlement…');
-  const res = await fetch(ENTITLEMENT_URL, {
-    method:  'POST',
-    headers: { 'Authorization': `Bearer ${tokens.id_token}` },
-  });
+  let res;
+  try {
+    res = await fetch(ENTITLEMENT_URL, {
+      method:  'POST',
+      headers: { 'Authorization': `Bearer ${tokens.id_token}` },
+    });
+  } catch (err) {
+    return {
+      ok: false,
+      reason: 'network_error',
+      message: (err && err.message) || 'Could not reach the entitlement server.',
+    };
+  }
+
   if (!res.ok) {
-    // Parse the function's JSON error body ({ error, message }) so callers
-    // can react to specific codes — e.g. 'pro_required' (trial ended).
+    // Parse the function's JSON error body ({ error, message }) so we can map
+    // specific codes to discriminated reasons.
     const text = await res.text();
     let code = null;
     let userMessage = null;
@@ -84,20 +119,48 @@ async function ensureEntitlement(onProgress) {
       code = parsed.error || null;
       userMessage = parsed.message || null;
     } catch { /* body wasn't JSON — leave code/message null */ }
-    const err = new Error(`Entitlement HTTP ${res.status}: ${text}`);
-    err.code = code;               // e.g. 'pro_required', 'access_revoked'
-    err.userMessage = userMessage; // human-readable text from the function
-    err.httpStatus = res.status;
-    err.idToken = tokens.id_token; // lets the caller start a Pro checkout
-    throw err;
+
+    // Recognized business outcomes: the user authenticated successfully but is
+    // not entitled. Carry the id token so the caller can start a Pro checkout.
+    if (code === 'pro_required' || code === 'access_revoked') {
+      return {
+        ok: false,
+        reason: code,
+        message: userMessage,
+        idToken: tokens.id_token,
+      };
+    }
+    // Anything else (5xx, or an unrecognized code) is a server-side error.
+    return {
+      ok: false,
+      reason: 'server_error',
+      message: userMessage || `Entitlement HTTP ${res.status}: ${text}`,
+      httpStatus: res.status,
+    };
   }
-  const { entitlement } = await res.json();
 
-  // 4. Verify + cache
-  const claims = await verifyEntitlement(entitlement);
-  saveEntitlement(entitlement);
+  // 4. Verify the freshly fetched entitlement. A malformed or unverifiable
+  //    payload here is a response from the world (a bad body from the Cloud
+  //    Function), so it is surfaced as a server_error rather than thrown.
+  let entitlement;
+  let claims;
+  try {
+    ({ entitlement } = await res.json());
+    claims = await verifyEntitlement(entitlement);
+  } catch (err) {
+    return {
+      ok: false,
+      reason: 'server_error',
+      message: (err && err.message) || 'Received an invalid entitlement response.',
+      httpStatus: res.status,
+    };
+  }
 
-  return { entitlement, identity: claims, fromCache: false };
+  // Persisting to the local cache is best-effort: a disk-write failure must not
+  // block a user who just verified — they simply re-auth on the next launch.
+  try { saveEntitlement(entitlement); } catch { /* non-fatal */ }
+
+  return { ok: true, entitlement, identity: claims, fromCache: false };
 }
 
 /**

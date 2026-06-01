@@ -66,8 +66,8 @@ folder, tests) that happens to contain a **Shiny** web app.
   load → preprocess → clustering / PCA / DEG / pathway / …. Change an input
   upstream and everything downstream recomputes automatically.
 - **Database:** species and pathway data come from a versioned database
-  (`db_ver`, currently `data113`), located via the `IDEP_DATABASE` environment
-  variable.
+  (`db_ver`, currently `data113`), located via the `IDEP_DATA_DIR` environment
+  variable (`IDEP_DATABASE` is accepted as a legacy alias).
 
 For desktop use this package is **compiled and installed into the bundled R
 runtime** during the build — it is not run from source.

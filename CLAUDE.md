@@ -79,7 +79,7 @@ Each module follows the pattern: `mod_XX_name_ui()` and `mod_XX_name_server()`
 - **Analysis utilities**: `R/utils_analysis_random.R`
 
 ### Database Integration
-- Uses environment variable `IDEP_DATABASE` or falls back to relative paths
+- Uses environment variable `IDEP_DATA_DIR` (canonical; `IDEP_DATABASE` is accepted as a legacy alias) or falls back to relative paths
 - Database version controlled via `db_ver` variable (currently "data113")
 - Species and pathway data loaded via `get_idep_data()` function
 
