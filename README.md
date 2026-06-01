@@ -211,11 +211,12 @@ can never drift apart:
 
 ```bash
 cd electron
-npm version 1.0.5 --no-git-tag-version
+npm version 1.0.x --no-git-tag-version
 cd ..
-git commit -am "Release desktop-v1.0.5"
-git tag desktop-v1.0.5
-git push && git push origin desktop-v1.0.5
+git commit -am "Release desktop-v1.0.x"
+git tag desktop-v1.0.x
+git push
+git push origin desktop-v1.0.x
 ```
 
 - Use `patch`, `minor`, or `major` (or `npm version 1.2.3` for an explicit

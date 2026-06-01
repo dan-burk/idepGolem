@@ -72,10 +72,11 @@ function getRuntime() {
       rscript,
       env: {
         R_HOME: R_ROOT,
-        R_LIBS: libDir,
-        R_LIBS_USER: libDir,
-        R_LIBS_SITE: '',
         R_USER: R_ROOT,
+        // Isolate the bundled runtime: never inherit a host site library,
+        // so a relocated R uses only the bundled package tree. R_LIBS_USER
+        // (the bundled library dir) is set at the spawn call below.
+        R_LIBS_SITE: '',
         PATH: [binDir, process.env.PATH || ''].filter(Boolean).join(';'),
       },
     };
@@ -118,9 +119,15 @@ function getRuntime() {
   };
 }
 
+// Return true if 'p' is a directory I can write to; otherwise false."
 function isWritableDir(p) {
-  try { fs.accessSync(p, fs.constants.W_OK); return fs.statSync(p).isDirectory(); } catch { return false; }
+  try {
+    fs.accessSync(p, fs.constants.W_OK);
+    return fs.statSync(p).isDirectory();
+  } catch { return false; }
 }
+
+// "If there's no process to kill, OR there is one but we already killed it, bail out."
 function safeKill(proc) {
   if (!proc || proc.killed) return;
   try {
@@ -164,6 +171,8 @@ async function waitForHttp(url, { timeoutMs = 120000, intervalMs = 500 } = {}) {
   throw new Error(`Timeout waiting for ${url}`);
 }
 
+// "Try to open a TCP server on start. If it fails (port in use), recurse with start + 1. If it succeeds, grab the 
+//      actual port number, close the server, and return that port."
 function getFreePort(start = 7777, end = 7999) {
   return new Promise((resolve, reject) => {
     const server = net.createServer();
@@ -180,6 +189,8 @@ function getFreePort(start = 7777, end = 7999) {
 }
 
 // update splash progress bar + taskbar progress
+// "If a window exists, push the progress fraction to both the taskbar AND the in-window splash JS —
+//  silently no-op on any failure."
 function setSplashProgress(progress, statusText) {
   if (!global.win) return;
   try {
@@ -242,7 +253,7 @@ async function signOutFlow() {
   log('[auth] Sign out requested — clearing cached entitlement');
   try { clearEntitlement(); } catch (e) { log('[auth] clearEntitlement failed', e && e.message); }
   app.isQuitting = true;
-  app.relaunch();
+  app.relaunch(); //Schedule relaunch
   app.quit();
 }
 
@@ -279,9 +290,9 @@ function buildAppMenu() {
 }
 
 // ---------- Pro upgrade dialog ----------
-// Shown when /entitlement denies a free user with code 'pro_required' — the
+// Shown when /entitlement denies a free user with reason 'pro_required' — the
 // trial is over. Offers to open Stripe Checkout in the system browser.
-async function showProUpgradeDialog(err) {
+async function showProUpgradeDialog(result) {
   const { response } = await dialog.showMessageBox({
     type: 'info',
     buttons: ['Upgrade to Pro', 'Quit'],
@@ -289,21 +300,21 @@ async function showProUpgradeDialog(err) {
     cancelId: 1,
     title: 'iDEP Trial Ended',
     message: 'Your iDEP free trial has ended.',
-    detail: (err && err.userMessage) ||
+    detail: (result && result.message) ||
       'Upgrade to iDEP Pro to keep using the desktop app.',
   });
   if (response !== 0) return; // "Quit" chosen — nothing more to do.
 
   // "Upgrade to Pro" chosen — open Stripe Checkout in the system browser.
   try {
-    const checkoutUrl = await startProCheckout(err.idToken);
+    const checkoutUrl = await startProCheckout(result.idToken);
     await shell.openExternal(checkoutUrl);
     await dialog.showMessageBox({
       type: 'info',
       buttons: ['OK'],
       title: 'Finish in your browser',
       message: 'Complete your purchase in the browser window that opened.',
-      detail: 'Once payment is done, reopen iDEP — you will have Pro access.',
+      detail: 'Once payment is approved, reopen iDEP — you will have Pro access.',
     });
   } catch (e) {
     log('[checkout error]', e && e.message ? e.message : String(e));
@@ -314,6 +325,21 @@ async function showProUpgradeDialog(err) {
       );
     } catch {}
   }
+}
+
+// ---------- Access revoked dialog ----------
+// Shown when /entitlement denies a user with reason 'access_revoked' — their
+// access was deliberately revoked (admin action), not a transient error, so
+// they get a tailored message pointing at support rather than a raw error box.
+async function showAccessRevokedDialog(result) {
+  await dialog.showMessageBox({
+    type: 'warning',
+    buttons: ['OK'],
+    title: 'Access Revoked',
+    message: 'Your iDEP access has been revoked.',
+    detail: (result && result.message) ||
+      'Please contact support if you believe this is in error.',
+  });
 }
 
 // ---------- bootstrap ----------
@@ -336,22 +362,34 @@ async function createWindow() {
   let identity = null;
   let hmacSecret = null;
   if (!DEV_MODE) {
-    try {
-      const result = await ensureEntitlement((pct, text) => setSplashProgress(pct, text));
+    const result = await ensureEntitlement((pct, text) => setSplashProgress(pct, text));
+    if (result.ok) {
       identity = result.identity;
-      log('[auth]', `Signed in as ${identity.email} (tier=${identity.tier}, fromCache=${result.fromCache})`);
       hmacSecret = getOrCreateHmacSecret();
-    } catch (err) {
-      // Trial over / Pro required → show the upgrade dialog instead of a
-      // raw error. Any other failure falls through to the generic box.
-      if (err && err.code === 'pro_required') {
-        log('[auth]', 'Entitlement denied (pro_required) — showing upgrade dialog');
-        await showProUpgradeDialog(err);
-        app.quit(); return;
+      log('[auth]', `Signed in as ${identity.email} (tier=${identity.tier}, fromCache=${result.fromCache})`);
+    } else {
+      // Known failure: route business outcomes to their own dialog, real
+      // errors to the generic box. The default branch surfaces any reason
+      // added upstream that we haven't handled here yet.
+      switch (result.reason) {
+        case 'pro_required':
+          log('[auth]', 'Entitlement denied (pro_required) — showing upgrade dialog');
+          await showProUpgradeDialog(result);
+          break;
+        case 'access_revoked':
+          log('[auth]', 'Entitlement denied (access_revoked) — showing revoked dialog');
+          await showAccessRevokedDialog(result);
+          break;
+        case 'auth_failed':
+        case 'network_error':
+        case 'server_error':
+          log('[auth error]', `Sign-in failed (${result.reason}): ${result.message}`);
+          try { dialog.showErrorBox('Sign-in Failed', result.message || 'Sign-in failed.'); } catch {}
+          break;
+        default:
+          log('[auth error]', `Unknown failure reason: ${result.reason}`);
+          try { dialog.showErrorBox('Sign-in Failed', `Unknown failure: ${result.reason}`); } catch {}
       }
-      const msg = `Sign-in failed: ${err && err.message ? err.message : String(err)}`;
-      log('[auth error]', msg);
-      try { dialog.showErrorBox('Sign-in Failed', msg); } catch {}
       app.quit(); return;
     }
   } else {
@@ -369,13 +407,24 @@ async function createWindow() {
   log('[demo data]', 'DEMO_DIR =', DEMO_DIR, 'exists =', demoDirExists);
 
   // data dir
+  // "if the directory the user launched from is real, isn't root, and is writable, drop the idep/ data folder right next to them;
+  //    otherwise fall back to the OS's user-data location."
   const LAUNCH_DIR = process.cwd();
+  // IDEP_DATA_DIR is canonical. IDEP_DATABASE is accepted as a legacy alias
+  // for users with existing launch scripts and server deployments.
   const overrideDir = process.env.IDEP_DATA_DIR || process.env.IDEP_DATABASE;
   let DATA_PARENT;
   if (overrideDir) DATA_PARENT = path.resolve(overrideDir);
   else if (LAUNCH_DIR && LAUNCH_DIR !== '/' && isWritableDir(LAUNCH_DIR)) DATA_PARENT = path.join(LAUNCH_DIR, 'idep');
   else DATA_PARENT = path.join(app.getPath('userData'), 'idep');
-  try { fs.mkdirSync(DATA_PARENT, { recursive: true }); } catch {}
+  try {
+    fs.mkdirSync(DATA_PARENT, { recursive: true });
+  } catch (e) {
+    const msg = `Could not create data directory at ${DATA_PARENT}\n${e.message}\nLog: ${LOG_FILE}`;
+    log('[FATAL]', msg);
+    try { dialog.showErrorBox('Data Directory Error', msg); } catch {}
+    app.quit(); return;
+  }
 
   // sanity — dev mode loads the package directly, so app.R isn't needed
   if (!DEV_MODE) {
@@ -393,20 +442,6 @@ async function createWindow() {
   if (!runtime) { app.quit(); return; }
   const { rscript, env } = runtime;
   setSplashProgress(0.25, 'R runtime located…');
-
-  // OPTIONAL: one-time diagnostics
-  try {
-    const diag = spawn(rscript, ['-e',
-      "cat('LIBPATHS:\\n', paste(.libPaths(), collapse='\\n'), '\\n')"
-    ], {
-      env: { ...process.env, ...env },
-      windowsHide: true,
-    });
-    diag.stdout.on('data', d => log('[R diag stdout]', String(d).trim()));
-    diag.stderr.on('data', d => log('[R diag stderr]', String(d).trim()));
-  } catch (e) {
-    log('[R diag error]', e && e.stack ? e.stack : String(e));
-  }
 
   // bootstrap.R is shipped as a static file — no runtime generation needed.
   // All config is passed via environment variables in the spawn call below.
@@ -438,13 +473,13 @@ async function createWindow() {
       env: {
         ...process.env,
         ...env,
-        IDEP_DATABASE: DATA_PARENT,
-        IDEP_DATA_DIR: DATA_PARENT,
+        IDEP_DATA_DIR: DATA_PARENT,   // canonical data-directory variable
+        IDEP_DATABASE: DATA_PARENT,   // legacy alias: run_app.R / RMD workflows still read it
         IDEP_APP_DIR: APP_DIR,
         IDEP_HOST: host,
         IDEP_PORT: String(port),
         IDEP_DEMO_DIR: DEMO_DIR, // pass demo dir hint to R
-        R_LIBS_USER: env?.R_LIBS || path.join(path.dirname(rscript), '..', 'library'),
+        R_LIBS_USER: path.join(path.dirname(rscript), '..', 'library'),
         // Phase 2d: Shiny verifies the per-session JWT signed with this secret.
         // Empty string when auth is disabled so R-side can detect that state.
         SHINY_HMAC_SECRET: hmacSecret || '',
@@ -460,22 +495,18 @@ async function createWindow() {
 
   setSplashProgress(0.5, 'Starting embedded R session…');
 
-  if (childProc && childProc.stdout) {
-    childProc.stdout.on('data', d => log('[R stdout]', String(d).trim()));
-  }
+  childProc.stdout.on('data', d => log('[R stdout]', String(d).trim()));
 
-  if (childProc && childProc.stderr) {
-    childProc.stderr.on('data', d => {
-      const text = String(d);
-      log('[R stderr]', text.trim());
+  childProc.stderr.on('data', d => {
+    const text = String(d);
+    log('[R stderr]', text.trim());
 
-      const m = text.match(/Listening on http:\/\/[^:]+:(\d+)/);
-      if (m) {
-        shinyPortFromLog = Number(m[1]);
-        log(`[port detect] Shiny reports listening on port ${shinyPortFromLog}`);
-      }
-    });
-  }
+    const m = text.match(/Listening on http:\/\/[^:]+:(\d+)/);
+    if (m) {
+      shinyPortFromLog = Number(m[1]);
+      log(`[port detect] Shiny reports listening on port ${shinyPortFromLog}`);
+    }
+  });
 
   childProc.on('close', (code, sig) => {
     log('[R exit]', `code=${code||0}`, sig ? `sig=${sig}` : '');

@@ -22,9 +22,13 @@ run_app <- function(onStart = NULL,
     db_ver <<- "data113"
     db_url <<- "http://bioinformatics.sdstate.edu/data/"
 
-    # if environmental variable is not set, use relative path
-    data_root <- Sys.getenv("IDEP_DATABASE")[1]
-    # if not defined in the environment, use two levels above
+    # IDEP_DATA_DIR is the canonical data-directory variable; IDEP_DATABASE is
+    # accepted as a legacy alias for older launch scripts and server setups.
+    data_root <- Sys.getenv("IDEP_DATA_DIR")[1]
+    if (nchar(data_root) == 0) {
+      data_root <- Sys.getenv("IDEP_DATABASE")[1]
+    }
+    # if neither is set in the environment, use relative path (two levels above)
     if (nchar(data_root) == 0) {
       data_root <- "../../data"
     }

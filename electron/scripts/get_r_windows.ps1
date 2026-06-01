@@ -68,14 +68,14 @@ try {
 
   Write-Host "Detected R home: $($rHome.FullName)"
 
-  # -------- Normalize to flat layout: ../runtime/win/R/{bin,library,...} --------
+  # -------- Normalize to flat layout: ../runtime/R.win/{bin,library,...} --------
   if (Test-Path $destR) {
     Write-Host "Cleaning existing $destR ..."
     Remove-Item -Recurse -Force $destR
   }
   New-Item -ItemType Directory -Force -Path $destR | Out-Null
 
-  # Copy CONTENTS of R-x.y.z into ../runtime/win/R (so we get R/bin, not R/R-x.y.z/bin)
+  # Copy CONTENTS of R-x.y.z into ../runtime/R.win (so we get R.win/bin, not R.win/R-x.y.z/bin)
   Write-Host "Copying portable R to $destR ..."
   Copy-Item -Recurse -Force -Path (Join-Path $rHome.FullName "*") -Destination $destR
 
