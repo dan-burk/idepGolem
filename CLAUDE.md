@@ -27,11 +27,12 @@ Replace `1.0.5` with the new version. The tag must match `package.json`.
 
 ```bash
 cd electron
-npm version 1.0.5 --no-git-tag-version
+npm version 1.0.x --no-git-tag-version
 cd ..
-git commit -am "Release desktop-v1.0.5"
-git tag desktop-v1.0.5
-git push && git push origin desktop-v1.0.5
+git commit -am "Release desktop-v1.0.x"
+git tag desktop-v1.0.x
+git push
+git push origin desktop-v1.0.x
 ```
 
 Triggers the three `build-electron-*` workflows. Do not use bare `npm version
