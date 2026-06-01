@@ -106,8 +106,9 @@ Key property: **R never contacts Google or Stripe.** All external auth happens
 in Electron; R only ever verifies a local, symmetric handshake. That keeps the
 R side simple and offline-capable.
 
-`IDEP_AUTH_DISABLED=1` in the environment bypasses steps 1–9 entirely — an
-emergency/dev escape hatch.
+In development (`IDEP_APP=dev`) the desktop shell bypasses steps 1–9 entirely.
+The bypass is gated on `!app.isPackaged`, so it only works in an unpackaged dev
+run and never in a shipped build.
 
 ---
 

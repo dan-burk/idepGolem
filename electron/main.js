@@ -10,7 +10,10 @@ const { getOrCreateHmacSecret } = require('./hmac');
 const { clearEntitlement } = require('./cache');
 // Node 22+ (bundled in Electron 39) provides global fetch natively
 
-const DEV_MODE = process.env.IDEP_APP === 'dev';
+// Dev mode bypasses auth/entitlement for local iteration. Gated on
+// !app.isPackaged so the bypass can never be enabled in a shipped build by
+// setting IDEP_APP=dev in the environment — it fails closed in production.
+const DEV_MODE = !app.isPackaged && process.env.IDEP_APP === 'dev';
 
 let childProc = null;
 

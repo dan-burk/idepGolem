@@ -142,7 +142,9 @@ launch, passes it to R via the `SHINY_HMAC_SECRET` environment variable, and
 **HMAC-signs every request** to Shiny with a per-session JWT. Shiny (via
 `R/auth_helpers.R`) rejects any request not carrying a valid signature.
 
-`IDEP_AUTH_DISABLED=1` bypasses all of Layer 3 — an emergency/dev escape hatch.
+In development (`IDEP_APP=dev`) Layer 3 is bypassed. The bypass is gated on
+`!app.isPackaged`, so it only takes effect in an unpackaged dev run and can
+never be enabled in a shipped build.
 
 > Full detail — the 9-step flow, the two-JWT design, every component, deployed
 > coordinates — is in [`auth-and-entitlement.md`](auth-and-entitlement.md). The

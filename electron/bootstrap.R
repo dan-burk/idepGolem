@@ -12,7 +12,7 @@ port     <- as.integer(Sys.getenv("IDEP_PORT", unset = "7777"))
 demo_dir_hint <- Sys.getenv("IDEP_DEMO_DIR", unset = file.path(app_dir, "data113"))
 
 # Phase 2d/2e: HMAC secret for the Electron → Shiny handshake.
-# Empty when launched outside Electron OR when IDEP_AUTH_DISABLED=1 was set.
+# Empty when launched outside Electron OR in dev mode (IDEP_APP=dev).
 # Stored as an R option so package code can read it via getOption("idep.shiny_hmac_secret").
 shiny_hmac_secret <- Sys.getenv("SHINY_HMAC_SECRET", unset = "")
 options(idep.shiny_hmac_secret = shiny_hmac_secret)

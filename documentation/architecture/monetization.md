@@ -210,9 +210,10 @@ desktop app fail closed and quit. Propagation is bounded by the entitlement
 JWT's 24h `exp` (see [ADR 0004](../decisions/0004-entitlement-expiry-offline-grace.md))
 — a revoked user is out within ~24h online.
 
-> Defeating the kill switch: the `IDEP_AUTH_DISABLED=1` env-var escape hatch
-> bypasses all auth. It must be **stripped from release builds**, or a
-> technical user can run free forever. Tracked in [§11](#11-current-state--whats-left).
+> Defeating the kill switch: the dev auth bypass (`IDEP_APP=dev`) skips all
+> auth. It is gated on `!app.isPackaged`, so it has **no effect in a packaged
+> release build** — a technical user setting the env var on a shipped app still
+> hits the full auth flow.
 
 ---
 
@@ -287,7 +288,6 @@ the free-tier policy, the kill switch, Pro checkout.
      "trial ended, upgrade or use the web app").
    - An "Upgrade to Pro" action that calls `/createCheckoutSession` and opens
      the URL.
-   - Strip `IDEP_AUTH_DISABLED` from release builds.
 3. **R / Shiny:** gate Pro features off `session$userData$identity$tier` — and
    decide *what* Free vs Pro actually gates (a product decision).
 4. **Later:** Stripe Customer Portal (in-place trial→paid conversion), a

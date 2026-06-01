@@ -8,7 +8,6 @@ app_ui <- function(request) {
     IDEP_HOST          = "Local-only address the Shiny server binds to — always 127.0.0.1, so it is never exposed to the network.",
     IDEP_PORT          = "The port Shiny listens on. Electron picks a free port at each launch and points the desktop window at it.",
     IDEP_DEMO_DIR      = "Folder holding the demo datasets bundled with the app.",
-    IDEP_AUTH_DISABLED = "Legacy switch that used to bypass sign-in; replaced by IDEP_APP=dev. 'NA' simply means it is not set.",
     IDEP_APP           = "Run mode. 'dev' skips sign-in for local iteration; in the shipped app it is unset, so the full auth flow runs.",
     R_LIBS_USER        = "The bundled package library R loads from — the same self-contained folder shown under Library paths.",
     R_HOME             = "Root of the private R installation Electron bundles inside the app.",

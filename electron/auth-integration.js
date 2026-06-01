@@ -2,7 +2,7 @@
 // Keeps main.js's createWindow() readable.
 
 const path = require('path');
-const { shell, session } = require('electron');
+const { app, shell, session } = require('electron');
 const { runPKCEFlow } = require('./auth');
 const { verifyEntitlement, entitlementStatus } = require('./entitlement');
 const { saveEntitlement, loadEntitlement, clearEntitlement } = require('./cache');
@@ -22,7 +22,9 @@ const ENTITLEMENT_URL            = process.env.ENTITLEMENT_URL;
 // the required-config check below.
 const CHECKOUT_URL               = process.env.CHECKOUT_URL;
 
-const DEV_MODE = process.env.IDEP_APP === 'dev';
+// Gated on !app.isPackaged so IDEP_APP=dev only takes effect in an unpackaged
+// dev run, never in a shipped build.
+const DEV_MODE = !app.isPackaged && process.env.IDEP_APP === 'dev';
 
 if (!DEV_MODE && (!GOOGLE_OAUTH_CLIENT_ID || !GOOGLE_OAUTH_CLIENT_SECRET || !ENTITLEMENT_URL)) {
   throw new Error(

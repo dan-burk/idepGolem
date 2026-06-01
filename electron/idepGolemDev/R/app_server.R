@@ -13,7 +13,7 @@ app_server <- function(input, output, session) {
   output$env_vars <- shiny::renderPrint({
     vars <- c(
       "IDEP_DATA_DIR", "IDEP_APP_DIR", "IDEP_HOST", "IDEP_PORT",
-      "IDEP_DEMO_DIR", "IDEP_AUTH_DISABLED", "IDEP_APP",
+      "IDEP_DEMO_DIR", "IDEP_APP",
       "R_LIBS_USER", "R_HOME", "SHINY_HMAC_SECRET"
     )
     for (v in vars) {
@@ -34,7 +34,7 @@ app_server <- function(input, output, session) {
     } else {
       shiny::span(class = "status-warn",
         "⚠ No HMAC secret — running unauthenticated ",
-        "(IDEP_AUTH_DISABLED=1 or launched outside Electron)."
+        "(dev mode via IDEP_APP=dev, or launched outside Electron)."
       )
     }
   })
