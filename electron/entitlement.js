@@ -31,7 +31,7 @@ async function loadPublicKey() {
  * Verify an entitlement JWT and return its claims.
  *
  * Verifies: signature (ES256), issuer, audience, exp.
- * Does NOT enforce grace_until — that's a separate check (see isValid).
+ * Does NOT enforce grace_until — that's a separate check (see entitlementStatus).
  *
  * @param {string} jwt - The entitlement JWT received from /entitlement
  * @returns {Promise<object>} The verified claims
@@ -68,7 +68,4 @@ function entitlementStatus(claims, nowSec = Math.floor(Date.now() / 1000)) {
 module.exports = {
   verifyEntitlement,
   entitlementStatus,
-  // exported for testing
-  loadPublicKey,
-  PUBLIC_KEY_PATH,
 };

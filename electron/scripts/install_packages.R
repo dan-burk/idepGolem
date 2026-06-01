@@ -1,6 +1,7 @@
 # install_packages.R
 # Shared cross-platform package installer using Posit Package Manager snapshots.
-# Called by get_r_linux.sh and get_r_windows.ps1.
+# Called by the build-electron-{linux,mac,windows} CI workflows. (The dev
+# get_r_*.{sh,ps1} scripts install only shiny/golem/idepGolemDev directly.)
 #
 # Usage:  Rscript install_packages.R [library_path]
 #   library_path  -- where to install packages (defaults to R's default .libPaths()[1])
