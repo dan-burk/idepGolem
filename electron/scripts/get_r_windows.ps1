@@ -93,11 +93,13 @@ try {
   Write-Host "✅ Windows R runtime ready under $destR"
 
   # ==================== Install dev R packages ====================
-  # Just shiny + golem + idepGolemDev — enough to run the diagnostic Shiny app.
-  # Production (build-electron-windows.yml) uses install_packages.R for the
-  # full ~355-package runtime; this dev script deliberately does not.
+  # shiny + golem + jose + idepGolemDev — enough to run the diagnostic Shiny app
+  # AND verify the Electron->Shiny auth handshake (jose decodes the session JWT;
+  # it pulls in openssl/askpass/sys). Production (build-electron-windows.yml)
+  # uses install_packages.R for the full ~355-package runtime; this dev script
+  # deliberately does not.
   Write-Host ""
-  Write-Host "==================== Installing dev packages (shiny + golem + idepGolemDev) ===================="
+  Write-Host "==================== Installing dev packages (shiny + golem + jose + idepGolemDev) ===================="
 
   $lib  = Join-Path $destR "library"
   $libR = $lib -replace '\\', '/'
@@ -120,8 +122,8 @@ try {
   $savedRLibsUser = $env:R_LIBS_USER
   $env:R_LIBS_USER = "NULL"
   try {
-    & $destRscript --vanilla -e "install.packages(c('shiny','golem'), lib='$libR', repos='https://cloud.r-project.org')" 2>&1 | Write-Host
-    if ($LASTEXITCODE -ne 0) { throw "Installing shiny/golem failed with exit code $LASTEXITCODE" }
+    & $destRscript --vanilla -e "install.packages(c('shiny','golem','jose'), lib='$libR', repos='https://cloud.r-project.org')" 2>&1 | Write-Host
+    if ($LASTEXITCODE -ne 0) { throw "Installing shiny/golem/jose failed with exit code $LASTEXITCODE" }
 
     & $Rexe --vanilla CMD INSTALL --library="$lib" "$devPkg" 2>&1 | Write-Host
     if ($LASTEXITCODE -ne 0) { throw "Installing idepGolemDev failed with exit code $LASTEXITCODE" }
@@ -132,7 +134,7 @@ try {
   $ErrorActionPreference = $savedPref
 
   Write-Host ""
-  Write-Host "✅ dev packages installed (shiny + golem + idepGolemDev)"
+  Write-Host "✅ dev packages installed (shiny + golem + jose + idepGolemDev)"
 }
 finally {
   if (Test-Path $tmp) {

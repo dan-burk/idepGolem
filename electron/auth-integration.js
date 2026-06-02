@@ -2,7 +2,7 @@
 // Keeps main.js's createWindow() readable.
 
 const path = require('path');
-const { app, shell, session } = require('electron');
+const { shell, session } = require('electron');
 const { runPKCEFlow } = require('./auth');
 const { verifyEntitlement, entitlementStatus } = require('./entitlement');
 const { saveEntitlement, loadEntitlement, clearEntitlement } = require('./cache');
@@ -22,11 +22,9 @@ const ENTITLEMENT_URL            = process.env.ENTITLEMENT_URL;
 // the required-config check below.
 const CHECKOUT_URL               = process.env.CHECKOUT_URL;
 
-// Gated on !app.isPackaged so IDEP_APP=dev only takes effect in an unpackaged
-// dev run, never in a shipped build.
-const DEV_MODE = !app.isPackaged && process.env.IDEP_APP === 'dev';
-
-if (!DEV_MODE && (!GOOGLE_OAUTH_CLIENT_ID || !GOOGLE_OAUTH_CLIENT_SECRET || !ENTITLEMENT_URL)) {
+// OAuth config is always required — authentication runs in every mode, dev and
+// production alike, with no bypass.
+if (!GOOGLE_OAUTH_CLIENT_ID || !GOOGLE_OAUTH_CLIENT_SECRET || !ENTITLEMENT_URL) {
   throw new Error(
     'Missing OAuth config. Copy electron/.env.example to electron/.env ' +
     'and fill in your Google OAuth credentials.'
@@ -190,9 +188,15 @@ function setupShinyRequestAuth({ host, port, hmacSecret, identity, log }) {
     refreshTimer.unref();
   });
 
-  const shinyURLPattern = `http://${host}:${port}/*`;
+  // Shiny serves the initial HTML over http:// but runs the live session over a
+  // WebSocket (ws://). session$request in R is the ws handshake request, so the
+  // header MUST be injected on ws:// too — http:// alone leaves R unauthenticated.
+  const shinyURLPatterns = [
+    `http://${host}:${port}/*`,
+    `ws://${host}:${port}/*`,
+  ];
   session.defaultSession.webRequest.onBeforeSendHeaders(
-    { urls: [shinyURLPattern] },
+    { urls: shinyURLPatterns },
     (details, callback) => {
       if (currentJWT) {
         details.requestHeaders['Authorization'] = `Bearer ${currentJWT}`;
@@ -201,7 +205,7 @@ function setupShinyRequestAuth({ host, port, hmacSecret, identity, log }) {
     }
   );
 
-  log('[shiny-auth] Authorization header injection active for', shinyURLPattern);
+  log('[shiny-auth] Authorization header injection active for', shinyURLPatterns.join(' '));
 }
 
 /**

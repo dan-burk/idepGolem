@@ -82,11 +82,13 @@ sudo apt-get install -y --no-install-recommends \
   build-essential libcurl4-openssl-dev libssl-dev
 
 # ==================== Install dev R packages ====================
-# Just shiny + golem + idepGolemDev — enough to run the diagnostic Shiny app.
-# Production (build-electron-linux.yml) uses install_packages.R for the
-# full ~355-package runtime; this dev script deliberately does not.
+# shiny + golem + jose + idepGolemDev — enough to run the diagnostic Shiny app
+# AND verify the Electron->Shiny auth handshake (jose decodes the session JWT;
+# it pulls in openssl/askpass/sys — libssl-dev above covers the build). Production
+# (build-electron-linux.yml) uses install_packages.R for the full ~355-package
+# runtime; this dev script deliberately does not.
 echo ""
-echo "==================== Installing dev packages (shiny + golem + idepGolemDev) ===================="
+echo "==================== Installing dev packages (shiny + golem + jose + idepGolemDev) ===================="
 
 LIB="${RDEST}/library"
 DEV_PKG="${ELECTRON_DIR}/idepGolemDev"
@@ -101,8 +103,8 @@ echo ""
 # app launch. R treats the literal string "NULL" as "no user library".
 # --vanilla alone is not enough because R sets the default R_LIBS_USER path
 # even when .Renviron is suppressed.
-R_LIBS_USER=NULL ${RSCRIPT} --vanilla -e "install.packages(c('shiny','golem'), lib='${LIB}', repos='https://cloud.r-project.org')"
+R_LIBS_USER=NULL ${RSCRIPT} --vanilla -e "install.packages(c('shiny','golem','jose'), lib='${LIB}', repos='https://cloud.r-project.org')"
 
 R_LIBS_USER=NULL "${RDEST}/bin/R" --vanilla CMD INSTALL --library="${LIB}" "${DEV_PKG}"
 
-echo "✅ dev packages installed (shiny + golem + idepGolemDev)"
+echo "✅ dev packages installed (shiny + golem + jose + idepGolemDev)"

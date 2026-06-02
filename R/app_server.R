@@ -5,6 +5,24 @@
 #' @import shiny
 #' @noRd
 app_server <- function(input, output, session) {
+  # --- Auth gate: hard-deny sessions without a valid Electron-issued JWT ------
+  # Only enforced when the HMAC secret is present (set by the desktop shell via
+  # SHINY_HMAC_SECRET). The pure-R dev server (run_dev.R) sets no secret and is
+  # therefore unaffected. See R/auth_helpers.R.
+  if (nzchar(getOption("idep.shiny_hmac_secret", ""))) {
+    identity <- shiny_identity_from_session(session)
+    session$userData$identity <- identity
+    if (is.null(identity)) {
+      shiny::showModal(shiny::modalDialog(
+        title = "Access denied",
+        "This iDEP server only accepts connections from the iDEP desktop app.",
+        footer = NULL, easyClose = FALSE
+      ))
+      session$close()
+      return(invisible(NULL))
+    }
+  }
+
   # file size is 5MB by default. This changes it to 30MB
   # options(shiny.maxRequestSize = 30*1024^2)
   options(warn = -1) # turn off warning

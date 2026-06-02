@@ -26,9 +26,16 @@ verify_shiny_jwt <- function(jwt,
   }
 
   tryCatch({
+    # jwt_decode_hmac verifies the HS256 signature (and errors on a bad one),
+    # but does NOT reliably enforce `exp` — so we check expiry, issuer, and
+    # audience ourselves below.
     claims <- jose::jwt_decode_hmac(jwt, secret = charToRaw(secret))
 
-    # Manual claim checks (jose::jwt_decode_hmac validates signature + exp only).
+    # Expiry: reject if exp is missing, unparseable, or in the past. exp may
+    # come back as numeric epoch seconds or POSIXct; as.numeric handles both.
+    exp <- suppressWarnings(as.numeric(claims$exp))
+    if (length(exp) != 1 || is.na(exp) || as.numeric(Sys.time()) >= exp) return(NULL)
+
     if (!identical(claims$iss, "idep-electron")) return(NULL)
     if (!identical(claims$aud, "idep-shiny"))    return(NULL)
 

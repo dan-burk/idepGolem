@@ -10,10 +10,12 @@ const { getOrCreateHmacSecret } = require('./hmac');
 const { clearEntitlement } = require('./cache');
 // Node 22+ (bundled in Electron 39) provides global fetch natively
 
-// Dev mode bypasses auth/entitlement for local iteration. Gated on
-// !app.isPackaged so the bypass can never be enabled in a shipped build by
-// setting IDEP_APP=dev in the environment — it fails closed in production.
-const DEV_MODE = !app.isPackaged && process.env.IDEP_APP === 'dev';
+// IDEP_APP=dev selects the lightweight idepGolemDev diagnostic package instead
+// of the full idepGolem app. It does NOT affect authentication: the OAuth +
+// entitlement check and the HMAC handshake always run, in dev and production
+// alike. There is no auth bypass. Gated on !app.isPackaged so a shipped build
+// always loads the real app.
+const USE_DEV_PACKAGE = !app.isPackaged && process.env.IDEP_APP === 'dev';
 
 let childProc = null;
 
@@ -215,6 +217,23 @@ function setSplashProgress(progress, statusText) {
   } catch {}
 }
 
+// Desktop-only keep-alive. Shiny greys out when its WebSocket sits idle, and
+// there is no runApp idle-timeout setting to raise — so we nudge the server
+// from the renderer every 30s to keep the socket warm. Injected by the shell,
+// so the web deployment is never affected. Re-injected on every page load so it
+// survives the splash -> app navigation and any reload. The guard prevents a
+// duplicate timer within a single page; the no-op when Shiny is absent covers
+// the splash page.
+const HEARTBEAT_JS = `(function () {
+  if (window.__idepHeartbeat) return;
+  window.__idepHeartbeat = setInterval(function () {
+    try {
+      var send = window.Shiny && (Shiny.setInputValue || Shiny.onInputChange);
+      if (send) send.call(Shiny, '.idepHeartbeat', Date.now(), { priority: 'event' });
+    } catch (e) {}
+  }, 30000);
+})();`;
+
 function showPlaceholder() {
   if (global.win) return;
   global.win = new BrowserWindow({
@@ -222,7 +241,18 @@ function showPlaceholder() {
     height: 500,
     show: true,
     resizable: true,
-    webPreferences: { contextIsolation: true, nodeIntegration: false },
+    webPreferences: {
+      contextIsolation: true,
+      nodeIntegration: false,
+      // Keep renderer timers running when the window is minimized/hidden so the
+      // heartbeat below keeps firing instead of being frozen by Chromium.
+      backgroundThrottling: false,
+    },
+  });
+
+  // Re-inject the keep-alive heartbeat after every load (splash + app + reloads).
+  global.win.webContents.on('did-finish-load', () => {
+    global.win.webContents.executeJavaScript(HEARTBEAT_JS).catch(() => {});
   });
 
   const splashPath = path.join(__dirname, 'splash.html');
@@ -281,13 +311,11 @@ function buildAppMenu() {
     },
   ];
 
-  // No account to sign out of when auth is bypassed.
-  if (!DEV_MODE) {
-    template.push({
-      label: 'Account',
-      submenu: [{ label: 'Sign Out', click: () => signOutFlow() }],
-    });
-  }
+  // Auth always runs, so there is always an account to sign out of.
+  template.push({
+    label: 'Account',
+    submenu: [{ label: 'Sign Out', click: () => signOutFlow() }],
+  });
 
   return Menu.buildFromTemplate(template);
 }
@@ -359,12 +387,12 @@ async function createWindow() {
   // show splash early
   showPlaceholder();
 
-  // --- Auth gate (Phase 2c) ---
-  // Run OAuth + entitlement check before spawning R. On failure, show a
-  // dialog and quit. Bypassed automatically when IDEP_APP=dev (npm run dev).
+  // --- Auth gate ---
+  // Always run the OAuth + entitlement check before spawning R — there is no
+  // dev bypass. On failure, show a dialog and quit without launching R.
   let identity = null;
   let hmacSecret = null;
-  if (!DEV_MODE) {
+  {
     const result = await ensureEntitlement((pct, text) => setSplashProgress(pct, text));
     if (result.ok) {
       identity = result.identity;
@@ -395,8 +423,6 @@ async function createWindow() {
       }
       app.quit(); return;
     }
-  } else {
-    log('[auth] Skipped — running in dev mode (IDEP_APP=dev)');
   }
 
   setSplashProgress(0.1, 'Preparing data directory…');
@@ -429,8 +455,8 @@ async function createWindow() {
     app.quit(); return;
   }
 
-  // sanity — dev mode loads the package directly, so app.R isn't needed
-  if (!DEV_MODE) {
+  // sanity — the dev package (idepGolemDev) loads directly, so app.R isn't needed
+  if (!USE_DEV_PACKAGE) {
     const appR = path.join(APP_DIR, 'app.R');
     if (!fs.existsSync(appR)) {
       const msg = `Missing app/app.R.\nLooked at: ${appR}\nLog: ${LOG_FILE}`;
@@ -566,7 +592,7 @@ async function createWindow() {
 
   // Phase 2d: inject HMAC-signed JWT on every request to the Shiny URL.
   // Done before loadURL so the very first request (HTML fetch) is authenticated.
-  if (!DEV_MODE && hmacSecret && identity) {
+  if (hmacSecret && identity) {
     setupShinyRequestAuth({ host, port: targetPort, hmacSecret, identity, log });
   }
 
