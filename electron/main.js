@@ -5,9 +5,9 @@ const fs = require('fs');
 const { spawn } = require('child_process');
 const net = require('net');
 const { checkForUpdates } = require('./updater');
-const { ensureEntitlement, setupShinyRequestAuth, startProCheckout } = require('./auth-integration');
+const { ensureEntitlement, setupShinyRequestAuth, startProCheckout, startPortalSession, getFreshIdToken } = require('./auth-integration');
 const { getOrCreateHmacSecret } = require('./hmac');
-const { clearEntitlement } = require('./cache');
+const { clearCredentials } = require('./cache');
 // Node 22+ (bundled in Electron 39) provides global fetch natively
 
 // IDEP_APP=dev selects the lightweight idepGolemDev diagnostic package instead
@@ -264,9 +264,10 @@ function showPlaceholder() {
 }
 
 // ---------- application menu ----------
-// Sign Out: clear the cached entitlement and relaunch. Next launch finds no
-// valid cache and runs the OAuth flow again — with select_account, the user
-// can pick a different Google account.
+// Sign Out: clear BOTH the cached entitlement and the Google refresh token,
+// then relaunch. Clearing the refresh token is what actually forces a fresh
+// login — otherwise the next launch would silently refresh straight back into
+// the same account. With select_account, the user can then pick a different one.
 async function signOutFlow() {
   const win = global.win;
   const opts = {
@@ -283,11 +284,76 @@ async function signOutFlow() {
     : await dialog.showMessageBox(opts);
   if (response !== 0) return;
 
-  log('[auth] Sign out requested — clearing cached entitlement');
-  try { clearEntitlement(); } catch (e) { log('[auth] clearEntitlement failed', e && e.message); }
+  log('[auth] Sign out requested — clearing cached credentials');
+  let cleared = false;
+  try {
+    cleared = clearCredentials();
+  } catch (e) {
+    log('[auth] clearCredentials threw', e && e.message);
+  }
+
+  if (!cleared) {
+    // A credential file could not be removed (locked / permission). Do NOT
+    // relaunch — that would silently sign the user back into the same account
+    // while looking like sign-out succeeded. Tell them instead.
+    log('[auth] Sign out FAILED — credential files could not be removed');
+    const failOpts = {
+      type: 'error',
+      buttons: ['OK'],
+      title: 'Sign Out Failed',
+      message: 'iDEP could not sign you out.',
+      detail: 'A credential file could not be removed (it may be in use). ' +
+        'Please try again, or fully quit and reopen iDEP.\n\nLog: ' + LOG_FILE,
+    };
+    if (win) await dialog.showMessageBox(win, failOpts);
+    else await dialog.showMessageBox(failOpts);
+    return;
+  }
+
   app.isQuitting = true;
   app.relaunch(); //Schedule relaunch
   app.quit();
+}
+
+// ---------- Manage subscription (Account menu) ----------
+// "Right door" routing: a subscriber (tier 'pro' — trialing or active) goes to
+// the Customer Portal to manage/cancel; a free user goes to Checkout to start
+// paying. A trialing user therefore NEVER hits Checkout (which would create a
+// second subscription). Needs a fresh Google id-token, minted silently from
+// the stored refresh token — the startup token isn't retained.
+async function manageSubscriptionFlow() {
+  const identity = global.identity;
+  if (!identity) return; // not signed in yet
+
+  const idToken = await getFreshIdToken();
+  if (!idToken) {
+    try {
+      dialog.showErrorBox(
+        'Sign-in Needed',
+        'Please sign out and sign in again to manage your subscription.',
+      );
+    } catch {}
+    return;
+  }
+
+  if (identity.tier === 'pro') {
+    // Subscriber → Customer Portal (manage payment method / cancel / invoices).
+    try {
+      const portalUrl = await startPortalSession(idToken);
+      await shell.openExternal(portalUrl);
+    } catch (e) {
+      log('[portal error]', e && e.message ? e.message : String(e));
+      try {
+        dialog.showErrorBox(
+          'Manage Subscription Error',
+          `Could not open the billing portal: ${e && e.message ? e.message : String(e)}`,
+        );
+      } catch {}
+    }
+  } else {
+    // Free → Checkout to start paying. Reuses the shared checkout opener.
+    await openProCheckout(idToken);
+  }
 }
 
 function buildAppMenu() {
@@ -314,31 +380,27 @@ function buildAppMenu() {
   // Auth always runs, so there is always an account to sign out of.
   template.push({
     label: 'Account',
-    submenu: [{ label: 'Sign Out', click: () => signOutFlow() }],
+    submenu: [
+      { label: 'Manage Subscription', click: () => manageSubscriptionFlow() },
+      { type: 'separator' },
+      { label: 'Sign Out', click: () => signOutFlow() },
+    ],
   });
 
   return Menu.buildFromTemplate(template);
 }
 
-// ---------- Pro upgrade dialog ----------
-// Shown when /entitlement denies a free user with reason 'pro_required' — the
-// trial is over. Offers to open Stripe Checkout in the system browser.
-async function showProUpgradeDialog(result) {
-  const { response } = await dialog.showMessageBox({
-    type: 'info',
-    buttons: ['Upgrade to Pro', 'Quit'],
-    defaultId: 0,
-    cancelId: 1,
-    title: 'iDEP Trial Ended',
-    message: 'Your iDEP free trial has ended.',
-    detail: (result && result.message) ||
-      'Upgrade to iDEP Pro to keep using the desktop app.',
-  });
-  if (response !== 0) return; // "Quit" chosen — nothing more to do.
+// Releases page for the "Update" action — the human-facing page where users
+// download the latest build. Override via RELEASES_PAGE in electron/.env
+// (loaded by auth-integration.js on require); falls back to GitHub releases.
+const RELEASES_PAGE = process.env.RELEASES_PAGE ||
+  'https://github.com/dan-burk/idepGolem/releases/latest';
 
-  // "Upgrade to Pro" chosen — open Stripe Checkout in the system browser.
+// Open Stripe Checkout for Pro in the system browser, then tell the user to
+// finish there. Shared by the trial-ended and update-required dialogs.
+async function openProCheckout(idToken) {
   try {
-    const checkoutUrl = await startProCheckout(result.idToken);
+    const checkoutUrl = await startProCheckout(idToken);
     await shell.openExternal(checkoutUrl);
     await dialog.showMessageBox({
       type: 'info',
@@ -356,6 +418,50 @@ async function showProUpgradeDialog(result) {
       );
     } catch {}
   }
+}
+
+// ---------- Pro upgrade dialog ----------
+// Shown when /entitlement denies a free user with reason 'pro_required' — the
+// trial is over. Offers to open Stripe Checkout in the system browser.
+async function showProUpgradeDialog(result) {
+  const { response } = await dialog.showMessageBox({
+    type: 'info',
+    buttons: ['Upgrade to Pro', 'Quit'],
+    defaultId: 0,
+    cancelId: 1,
+    title: 'iDEP Trial Ended',
+    message: 'Your iDEP free trial has ended.',
+    detail: (result && result.message) ||
+      'Upgrade to iDEP Pro to keep using the desktop app.',
+  });
+  if (response !== 0) return; // "Quit" chosen — nothing more to do.
+  await openProCheckout(result.idToken); // "Upgrade to Pro" chosen.
+}
+
+// ---------- Update required dialog ----------
+// Shown when /entitlement denies a FREE user with reason 'update_required' —
+// their build is older than the free tier's minimum version. They can update
+// the app, or upgrade to Pro (never version-gated) to keep running their
+// current version. The app quits afterward either way (the auth gate failed).
+async function showUpdateRequiredDialog(result) {
+  const { response } = await dialog.showMessageBox({
+    type: 'info',
+    buttons: ['Update', 'Upgrade to Pro', 'Quit'],
+    defaultId: 0,
+    cancelId: 2,
+    title: 'Update Required',
+    message: 'A newer version of iDEP is required on the free tier.',
+    detail: (result && result.message) ||
+      'Update to the latest release, or upgrade to Pro to keep using your ' +
+      'current version.',
+  });
+
+  if (response === 0) {
+    await shell.openExternal(RELEASES_PAGE); // "Update" → download latest.
+  } else if (response === 1) {
+    await openProCheckout(result.idToken);   // "Upgrade to Pro" → keep version.
+  }
+  // response === 2 ("Quit"): nothing.
 }
 
 // ---------- Access revoked dialog ----------
@@ -396,6 +502,7 @@ async function createWindow() {
     const result = await ensureEntitlement((pct, text) => setSplashProgress(pct, text));
     if (result.ok) {
       identity = result.identity;
+      global.identity = identity; // expose tier/email to the Account-menu actions
       hmacSecret = getOrCreateHmacSecret();
       log('[auth]', `Signed in as ${identity.email} (tier=${identity.tier}, fromCache=${result.fromCache})`);
     } else {
@@ -406,6 +513,10 @@ async function createWindow() {
         case 'pro_required':
           log('[auth]', 'Entitlement denied (pro_required) — showing upgrade dialog');
           await showProUpgradeDialog(result);
+          break;
+        case 'update_required':
+          log('[auth]', 'Entitlement denied (update_required) — showing update dialog');
+          await showUpdateRequiredDialog(result);
           break;
         case 'access_revoked':
           log('[auth]', 'Entitlement denied (access_revoked) — showing revoked dialog');

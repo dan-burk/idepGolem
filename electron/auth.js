@@ -136,6 +136,47 @@ async function exchangeCodeForTokens({
 }
 
 /**
+ * Silently obtain a fresh Google id-token from a stored refresh token — no
+ * browser, no user interaction (RFC 6749 §6, grant_type=refresh_token).
+ *
+ * Google does not return a new refresh_token on this grant, so the caller
+ * keeps the one it already has. Throws on any non-2xx (e.g. the refresh token
+ * was revoked or has expired) so the caller can fall back to interactive login.
+ *
+ * @param {object} opts
+ * @param {string} opts.clientId
+ * @param {string} opts.clientSecret
+ * @param {string} opts.refreshToken
+ * @returns {Promise<object>} { id_token, access_token, expires_in, ... }
+ */
+async function refreshIdToken({ clientId, clientSecret, refreshToken }) {
+  const body = new URLSearchParams({
+    grant_type:    'refresh_token',
+    refresh_token: refreshToken,
+    client_id:     clientId,
+    client_secret: clientSecret,
+  });
+
+  const res = await fetch(GOOGLE_TOKEN_URL, {
+    method:  'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body,
+  });
+
+  if (!res.ok) {
+    const text = await res.text();
+    // httpStatus present ⇒ Google rejected the grant (e.g. 400 invalid_grant:
+    // refresh token revoked/expired). A network failure rejects `fetch` with
+    // no httpStatus, so the caller can tell "revoked" from "offline" apart.
+    const err = new Error(`Refresh failed (${res.status}): ${text}`);
+    err.httpStatus = res.status;
+    throw err;
+  }
+
+  return res.json();
+}
+
+/**
  * Run the full PKCE flow end-to-end.
  *
  * @param {object} opts
@@ -178,6 +219,7 @@ async function runPKCEFlow({
 
 module.exports = {
   runPKCEFlow,
+  refreshIdToken,
   // exported for unit testing
   generatePKCE,
   generateState,
