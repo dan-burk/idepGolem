@@ -322,24 +322,143 @@ async function startProCheckout(idToken) {
 }
 
 /**
- * Get a fresh Google id-token silently from the stored refresh token, for
- * authenticated menu actions (Manage Subscription / Upgrade) after launch —
- * the id-token used at startup isn't retained. Returns null if there's no
- * refresh token or the refresh fails (caller should ask the user to re-auth).
+ * Pull the email claim out of a Google id-token WITHOUT verifying its
+ * signature. Safe here because the token came straight from Google's token
+ * endpoint over TLS, and we use the email only to confirm the user
+ * re-authenticated as the SAME account — never to grant access.
  */
-async function getFreshIdToken() {
-  const refreshToken = loadRefreshToken();
-  if (!refreshToken) return null;
+function emailFromIdToken(idToken) {
   try {
-    const tokens = await refreshIdToken({
-      clientId:     GOOGLE_OAUTH_CLIENT_ID,
-      clientSecret: GOOGLE_OAUTH_CLIENT_SECRET,
-      refreshToken,
-    });
-    return tokens.id_token || null;
+    const payload = String(idToken).split('.')[1];
+    return JSON.parse(Buffer.from(payload, 'base64url').toString('utf8')).email || null;
   } catch {
     return null;
   }
+}
+
+/**
+ * Obtain a fresh Google id-token for an authenticated menu action (Manage
+ * Subscription), for the SAME account that is signed in. Tries the silent
+ * refresh-token grant first; if there's no refresh token or it was revoked,
+ * falls back to an interactive login PINNED to `currentEmail` (login_hint +
+ * no account chooser). A transient/offline failure does NOT open the browser.
+ *
+ * Mid-session account switching is not allowed — the only way to switch is
+ * Sign Out → Sign In. Google won't hard-restrict the account at its own
+ * screen, so we enforce it: a login as a different account is refused.
+ *
+ * @param {string} currentEmail - the signed-in account (global.identity.email)
+ * @returns {Promise<object>} one of:
+ *   { ok: true,  idToken }
+ *   { ok: false, reason: 'network_error',    message }   // offline / 5xx — no browser shown
+ *   { ok: false, reason: 'auth_failed',      message }   // browser cancelled / failed
+ *   { ok: false, reason: 'account_mismatch', email }     // signed in as someone else
+ */
+async function getActionIdToken(currentEmail) {
+  // 1. Silent: stored refresh token → fresh id-token, no browser.
+  const refreshToken = loadRefreshToken();
+  if (refreshToken) {
+    try {
+      const tokens = await refreshIdToken({
+        clientId:     GOOGLE_OAUTH_CLIENT_ID,
+        clientSecret: GOOGLE_OAUTH_CLIENT_SECRET,
+        refreshToken,
+      });
+      if (tokens.id_token) return { ok: true, idToken: tokens.id_token };
+    } catch (err) {
+      // 4xx ⇒ revoked/expired: drop it and re-auth interactively below.
+      // Anything else (5xx, or no response = offline) is transient — report it
+      // rather than popping a browser the user didn't ask for.
+      if (err && err.httpStatus >= 400 && err.httpStatus < 500) {
+        clearRefreshToken();
+      } else {
+        return {
+          ok: false,
+          reason: 'network_error',
+          message: (err && err.message) || 'Could not reach the sign-in server.',
+        };
+      }
+    }
+  }
+
+  // 2. Interactive, pinned to the current account: login_hint + no chooser.
+  let tokens;
+  try {
+    tokens = await runPKCEFlow({
+      clientId:      GOOGLE_OAUTH_CLIENT_ID,
+      clientSecret:  GOOGLE_OAUTH_CLIENT_SECRET,
+      openInBrowser: (url) => shell.openExternal(url),
+      loginHint:     currentEmail,
+      prompt:        'consent', // no select_account: re-auth THIS account
+    });
+  } catch (err) {
+    return {
+      ok: false,
+      reason: 'auth_failed',
+      message: (err && err.message) || 'Sign-in was cancelled or failed.',
+    };
+  }
+
+  // 3. Hard guard: Google won't guarantee the account, so we do. A different
+  //    account is refused — switching is only via Sign Out → Sign In.
+  const email = emailFromIdToken(tokens.id_token);
+  if (!email || email.toLowerCase() !== String(currentEmail).toLowerCase()) {
+    return { ok: false, reason: 'account_mismatch', email };
+  }
+
+  // Same account confirmed → persist the fresh refresh token (best-effort: a
+  // keyring-less Linux box can't save it, but the id-token in hand still works).
+  if (tokens.refresh_token) {
+    try { saveRefreshToken(tokens.refresh_token); } catch { /* non-fatal */ }
+  }
+  return { ok: true, idToken: tokens.id_token };
+}
+
+/**
+ * Read the live tier for `idToken` by exchanging it at /entitlement, so a menu
+ * action routes on current state instead of the (possibly stale) session tier.
+ * Unlike ensureEntitlement this does NOT fall back to the cached grace window —
+ * a manual action wants the live answer, or an honest failure.
+ *
+ * @returns {Promise<object>} one of:
+ *   { identity }     // entitled — identity.tier is authoritative
+ *   { proRequired }  // authenticated but not entitled → must pay (Checkout)
+ *   { error }        // offline / server / revoked — caller falls back to session tier
+ */
+async function fetchCurrentTier(idToken) {
+  let res;
+  try {
+    res = await fetch(ENTITLEMENT_URL, {
+      method:  'POST',
+      headers: {
+        'Authorization':      `Bearer ${idToken}`,
+        'X-IDEP-App-Version': app.getVersion(),
+      },
+    });
+  } catch (err) {
+    return { error: (err && err.message) || 'network error' };
+  }
+  if (res.ok) {
+    try {
+      const { entitlement } = await res.json();
+      const claims = await verifyEntitlement(entitlement);
+      try { saveEntitlement(entitlement); } catch { /* non-fatal */ }
+      return { identity: claims };
+    } catch (err) {
+      return { error: (err && err.message) || 'invalid entitlement' };
+    }
+  }
+  const text = await res.text();
+  let code = null;
+  let message = null;
+  try {
+    const parsed = JSON.parse(text);
+    code = parsed.error || null;
+    message = parsed.message || null;
+  } catch { /* body wasn't JSON */ }
+  if (code === 'pro_required') return { proRequired: true };
+  if (code === 'access_revoked') return { revoked: true, message };
+  return { error: `HTTP ${res.status}` };
 }
 
 /**
@@ -375,5 +494,6 @@ module.exports = {
   setupShinyRequestAuth,
   startProCheckout,
   startPortalSession,
-  getFreshIdToken,
+  getActionIdToken,
+  fetchCurrentTier,
 };

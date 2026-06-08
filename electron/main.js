@@ -5,7 +5,7 @@ const fs = require('fs');
 const { spawn } = require('child_process');
 const net = require('net');
 const { checkForUpdates } = require('./updater');
-const { ensureEntitlement, setupShinyRequestAuth, startProCheckout, startPortalSession, getFreshIdToken } = require('./auth-integration');
+const { ensureEntitlement, setupShinyRequestAuth, startProCheckout, startPortalSession, getActionIdToken, fetchCurrentTier } = require('./auth-integration');
 const { getOrCreateHmacSecret } = require('./hmac');
 const { clearCredentials } = require('./cache');
 // Node 22+ (bundled in Electron 39) provides global fetch natively
@@ -320,40 +320,84 @@ async function signOutFlow() {
 // "Right door" routing: a subscriber (tier 'pro' — trialing or active) goes to
 // the Customer Portal to manage/cancel; a free user goes to Checkout to start
 // paying. A trialing user therefore NEVER hits Checkout (which would create a
-// second subscription). Needs a fresh Google id-token, minted silently from
-// the stored refresh token — the startup token isn't retained.
+// second subscription).
+//
+// Auth: re-mint a Google id-token for the CURRENT account — silently from the
+// stored refresh token, or, if that's gone/revoked, via an interactive login
+// pinned to this account (no account chooser). Switching accounts mid-session
+// is not allowed; the only way to switch is Sign Out → Sign In. The routing
+// tier is re-fetched from the fresh token so it can't act on a stale session.
+let manageInFlight = false; // one Manage Subscription flow at a time (no double-click)
+
 async function manageSubscriptionFlow() {
   const identity = global.identity;
-  if (!identity) return; // not signed in yet
-
-  const idToken = await getFreshIdToken();
-  if (!idToken) {
-    try {
-      dialog.showErrorBox(
-        'Sign-in Needed',
-        'Please sign out and sign in again to manage your subscription.',
-      );
-    } catch {}
-    return;
-  }
-
-  if (identity.tier === 'pro') {
-    // Subscriber → Customer Portal (manage payment method / cancel / invoices).
-    try {
-      const portalUrl = await startPortalSession(idToken);
-      await shell.openExternal(portalUrl);
-    } catch (e) {
-      log('[portal error]', e && e.message ? e.message : String(e));
-      try {
+  if (!identity) return;       // not signed in yet
+  if (manageInFlight) return;  // ignore re-entrant clicks
+  manageInFlight = true;
+  try {
+    // Fresh id-token for the current account (silent, else pinned popup).
+    const tok = await getActionIdToken(identity.email);
+    if (!tok.ok) {
+      if (tok.reason === 'account_mismatch') {
         dialog.showErrorBox(
-          'Manage Subscription Error',
-          `Could not open the billing portal: ${e && e.message ? e.message : String(e)}`,
+          'Wrong Account',
+          `You signed in as ${tok.email || 'a different account'}, but iDEP is ` +
+          `signed in as ${identity.email}.\n\nTo switch accounts, use ` +
+          `Account → Sign Out, then sign in again.`,
         );
-      } catch {}
+      } else if (tok.reason === 'network_error') {
+        dialog.showErrorBox(
+          'Connection Problem',
+          'Could not reach the sign-in server. Check your internet connection ' +
+          'and try again.',
+        );
+      } else {
+        dialog.showErrorBox(
+          'Sign-in Incomplete',
+          'Sign-in did not complete. Please try again.',
+        );
+      }
+      return;
     }
-  } else {
-    // Free → Checkout to start paying. Reuses the shared checkout opener.
-    await openProCheckout(idToken);
+    const idToken = tok.idToken;
+
+    // Route on the LIVE tier for this account, not the (possibly stale) session
+    // tier — e.g. a user who subscribed earlier this session must reach the
+    // Portal, not Checkout. On a lookup failure, fall back to the session tier.
+    let tier = identity.tier;
+    const tierRes = await fetchCurrentTier(idToken);
+    if (tierRes.revoked) {
+      // Access deliberately revoked — don't route to Portal/Checkout at all.
+      await showAccessRevokedDialog({ message: tierRes.message });
+      return;
+    }
+    if (tierRes.identity) {
+      tier = tierRes.identity.tier;
+      global.identity = tierRes.identity; // keep the menu's identity current
+    } else if (tierRes.proRequired) {
+      tier = 'free';                       // authenticated but not entitled → pay
+    } // else: lookup failed — keep the session tier as a best-effort fallback
+
+    if (tier === 'pro') {
+      // Subscriber → Customer Portal (manage payment method / cancel / invoices).
+      try {
+        const portalUrl = await startPortalSession(idToken);
+        await shell.openExternal(portalUrl);
+      } catch (e) {
+        log('[portal error]', e && e.message ? e.message : String(e));
+        try {
+          dialog.showErrorBox(
+            'Manage Subscription Error',
+            `Could not open the billing portal: ${e && e.message ? e.message : String(e)}`,
+          );
+        } catch {}
+      }
+    } else {
+      // Free → Checkout to start paying. Reuses the shared checkout opener.
+      await openProCheckout(idToken);
+    }
+  } finally {
+    manageInFlight = false;
   }
 }
 
@@ -478,6 +522,50 @@ async function showAccessRevokedDialog(result) {
     detail: (result && result.message) ||
       'Please contact support if you believe this is in error.',
   });
+}
+
+// Load the Shiny URL with retries. loadURL()'s promise can reject with
+// ERR_ABORTED/ERR_FAILED even when the page actually loads — Shiny replaces the
+// initial navigation with its own, which aborts the first load. A genuinely
+// not-quite-ready server can also need a second attempt. So: retry a few times,
+// and treat "the page finished loading" as success regardless of whether the
+// promise rejected. Only the caller's catch (→ Load Error dialog) fires if every
+// attempt fails AND nothing ever finished loading.
+async function loadAppURL(win, url, { attempts = 3, delayMs = 750 } = {}) {
+  const wc = win.webContents;
+  let finished = false;      // a navigation finished loading this attempt
+  let mainFrameFail = null;  // last HARD main-frame failure (not a benign abort)
+  const onFinish = () => { finished = true; };
+  // -3 = ERR_ABORTED: a superseded/replaced navigation (Shiny does this on its
+  // first paint) — benign. Any other main-frame error is a real failure,
+  // INCLUDING a dead server whose Chromium error page still fires did-finish-load.
+  const onFail = (_e, errorCode, _desc, _failedURL, isMainFrame) => {
+    if (isMainFrame && errorCode !== -3) mainFrameFail = errorCode;
+  };
+  wc.on('did-finish-load', onFinish);
+  wc.on('did-fail-load', onFail);
+  try {
+    for (let i = 1; i <= attempts; i++) {
+      finished = false;
+      mainFrameFail = null;
+      try {
+        await win.loadURL(url);
+        return; // clean load
+      } catch (e) {
+        // Give any superseding navigation a moment to finish before judging.
+        await new Promise((r) => setTimeout(r, delayMs));
+        // Success only if the page actually finished AND no hard main-frame
+        // failure is outstanding — so a benign aborted-then-loaded navigation
+        // passes, but a genuinely dead server still surfaces the dialog.
+        if (finished && mainFrameFail === null) return;
+        log(`[loadURL] attempt ${i}/${attempts} failed: ${e && e.message ? e.message : String(e)}`);
+        if (i === attempts) throw e;
+      }
+    }
+  } finally {
+    wc.removeListener('did-finish-load', onFinish);
+    wc.removeListener('did-fail-load', onFail);
+  }
 }
 
 // ---------- bootstrap ----------
@@ -727,7 +815,7 @@ async function createWindow() {
         webPreferences: { contextIsolation: true, nodeIntegration: false }
       });
     }
-    await global.win.loadURL(finalURL);
+    await loadAppURL(global.win, finalURL);
     setSplashProgress(-1, ''); // clear taskbar progress
     // 5s delay keeps the GitHub fetch out of Shiny startup contention.
     setTimeout(() => {

@@ -92,7 +92,8 @@ function startLoopbackServer({ expectedState, timeoutMs = 5 * 60 * 1000 } = {}) 
   });
 }
 
-function buildAuthURL({ clientId, redirectUri, codeChallenge, state, scopes }) {
+function buildAuthURL({ clientId, redirectUri, codeChallenge, state, scopes,
+  loginHint, prompt = 'select_account consent' }) {
   const params = new URLSearchParams({
     response_type:         'code',
     client_id:             clientId,
@@ -102,10 +103,13 @@ function buildAuthURL({ clientId, redirectUri, codeChallenge, state, scopes }) {
     code_challenge_method: 'S256',
     state,
     access_type:           'offline',
-    // select_account → always show the Google account chooser (multi-account
-    // machines / "switch account"). consent → guarantees a refresh_token.
-    prompt:                'select_account consent',
+    // Default 'select_account consent' → always show the Google account chooser
+    // (multi-account machines / first sign-in) and guarantee a refresh_token.
+    // A caller re-authenticating a KNOWN account passes prompt:'consent' plus
+    // loginHint to skip the chooser and pin that account.
+    prompt,
   });
+  if (loginHint) params.set('login_hint', loginHint);
   return `${GOOGLE_AUTH_URL}?${params}`;
 }
 
@@ -192,6 +196,8 @@ async function runPKCEFlow({
   clientSecret,
   scopes = ['openid', 'email', 'profile'],
   openInBrowser,
+  loginHint,
+  prompt,
 }) {
   const { verifier, challenge } = generatePKCE();
   const state = generateState();
@@ -206,6 +212,8 @@ async function runPKCEFlow({
     codeChallenge: challenge,
     state,
     scopes,
+    loginHint,
+    prompt,
   });
 
   openInBrowser(authUrl);
