@@ -98,3 +98,21 @@ for the wrong person. Switching is only allowed via Sign Out → Sign In.
 2. DO: Launch iDEP normally. ✅ EXPECT: **no** "Load Error" dialog.
 3. DO: Start any app that grabs **port 7777**, then launch iDEP. ✅ EXPECT: iDEP still loads
    fine (it auto-picks another free port).
+   - NOTE: if 7777 is already held by a leftover iDEP/R process from a previous crash,
+     kill that first — otherwise you're testing the wrong thing.
+
+## FLOW 9 — Sign Out can't be faked when a credential file is locked
+**Why:** if a credential file can't be deleted (locked / in use), iDEP must NOT pretend
+sign-out worked and relaunch you straight back into the same account. It must say it failed.
+- SETUP: With iDEP open and signed in, lock **one** credential file so it can't be deleted.
+  Most reliable way (PowerShell — leave the window OPEN so the lock holds):
+  ```
+  $f = [System.IO.File]::Open("<path to entitlement.bin>", 'Open', 'Read', 'None')
+  ```
+  Simpler alternative: `attrib +R "<path to entitlement.bin>"` (read-only also blocks delete).
+1. DO: Account → Sign Out → confirm. ✅ EXPECT: a **"Sign Out Failed"** dialog that mentions
+   a locked credential file and points to **info@orditus.com**. The app does **NOT** relaunch.
+   ❌ FAIL: the app relaunches and silently signs you back in as if sign-out worked.
+2. DO: Release the lock — `$f.Close()` in PowerShell (or `attrib -R "<path>"`).
+3. DO: Account → Sign Out → confirm again. ✅ EXPECT: normal sign-out — app relaunches
+   to the login screen.
