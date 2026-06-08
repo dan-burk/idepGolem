@@ -303,7 +303,8 @@ async function signOutFlow() {
       title: 'Sign Out Failed',
       message: 'iDEP could not sign you out.',
       detail: 'A credential file could not be removed (it may be in use). ' +
-        'Please try again, or fully quit and reopen iDEP.\n\nLog: ' + LOG_FILE,
+        'Please fully quit iDEP and retry. If the issue persists, contact us ' +
+        'at info@orditus.com.\n\nLog: ' + LOG_FILE,
     };
     if (win) await dialog.showMessageBox(win, failOpts);
     else await dialog.showMessageBox(failOpts);
