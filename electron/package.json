@@ -1,6 +1,6 @@
 {
   "name": "idepGolem",
-  "version": "1.0.9",
+  "version": "1.0.10",
   "description": "Desktop App for iDEP",
   "private": true,
   "main": "main.js",
