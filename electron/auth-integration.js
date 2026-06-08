@@ -2,7 +2,7 @@
 // Keeps main.js's createWindow() readable.
 
 const path = require('path');
-const { shell, session, app } = require('electron');
+const { shell, session, app, net } = require('electron');
 const { runPKCEFlow, refreshIdToken } = require('./auth');
 const { verifyEntitlement, entitlementStatus } = require('./entitlement');
 const {
@@ -382,6 +382,20 @@ async function getActionIdToken(currentEmail) {
   }
 
   // 2. Interactive, pinned to the current account: login_hint + no chooser.
+  //    Bail out if we're offline: otherwise the browser opens to a Google page
+  //    that can't load and the loopback callback server hangs for its full
+  //    timeout (~5 min), leaving this action stuck "in flight" so the menu item
+  //    appears dead even after the network returns. (A user WITH a refresh
+  //    token never reaches here offline — the silent path returns network_error
+  //    above.) net.isOnline() catches "no network", not "Google specifically
+  //    unreachable", which covers the common wifi-off case.
+  if (!net.isOnline()) {
+    return {
+      ok: false,
+      reason: 'network_error',
+      message: 'Could not reach the sign-in server. Check your internet connection.',
+    };
+  }
   let tokens;
   try {
     tokens = await runPKCEFlow({

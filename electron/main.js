@@ -316,6 +316,35 @@ async function signOutFlow() {
   app.quit();
 }
 
+// A small frameless "Sending you to Stripe…" window, shown during the network
+// round-trips in manageSubscriptionFlow (token already in hand) so the wait
+// before the browser opens isn't dead air. Dark/green styling matches splash.html.
+function showStripeSpinner() {
+  const html = `<!doctype html><html><head><meta charset="utf-8"><style>
+    html,body{margin:0;height:100%;}
+    body{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:18px;
+      background:#0f172a;color:#f8fafc;-webkit-user-select:none;user-select:none;
+      font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,Roboto,"Helvetica Neue",Arial,sans-serif;}
+    .ring{width:38px;height:38px;border-radius:50%;border:4px solid rgba(148,163,184,0.25);
+      border-top-color:#22c55e;animation:spin .8s linear infinite;}
+    @keyframes spin{to{transform:rotate(360deg);}}
+    .msg{font-size:15px;color:#cbd5e1;letter-spacing:.2px;}
+  </style></head><body><div class="ring"></div><div class="msg">Sending you to Stripe…</div></body></html>`;
+  const win = new BrowserWindow({
+    width: 300, height: 170,
+    resizable: false, minimizable: false, maximizable: false, fullscreenable: false,
+    frame: false, center: true, alwaysOnTop: true, show: false,
+    parent: global.win || undefined,
+    backgroundColor: '#0f172a',
+    webPreferences: { contextIsolation: true, nodeIntegration: false },
+  });
+  win.removeMenu();
+  win.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(html));
+  // show: false until loaded avoids a white flash before the dark page paints.
+  win.once('ready-to-show', () => { if (!win.isDestroyed()) win.show(); });
+  return win;
+}
+
 // ---------- Manage subscription (Account menu) ----------
 // "Right door" routing: a subscriber (tier 'pro' — trialing or active) goes to
 // the Customer Portal to manage/cancel; a free user goes to Checkout to start
@@ -334,8 +363,17 @@ async function manageSubscriptionFlow() {
   if (!identity) return;       // not signed in yet
   if (manageInFlight) return;  // ignore re-entrant clicks
   manageInFlight = true;
+
+  let spinner = null;
+  const closeSpinner = () => {
+    if (spinner && !spinner.isDestroyed()) spinner.close();
+    spinner = null;
+  };
+
   try {
-    // Fresh id-token for the current account (silent, else pinned popup).
+    // Fresh id-token for the current account (silent, else pinned popup). No
+    // spinner yet — this step may open an interactive Google login, and a
+    // "Sending you to Stripe…" message over that would be wrong.
     const tok = await getActionIdToken(identity.email);
     if (!tok.ok) {
       if (tok.reason === 'account_mismatch') {
@@ -361,6 +399,10 @@ async function manageSubscriptionFlow() {
     }
     const idToken = tok.idToken;
 
+    // Token's in hand and no interaction is left — only network round-trips
+    // remain until the browser opens. Show the spinner so the wait isn't dead air.
+    spinner = showStripeSpinner();
+
     // Route on the LIVE tier for this account, not the (possibly stale) session
     // tier — e.g. a user who subscribed earlier this session must reach the
     // Portal, not Checkout. On a lookup failure, fall back to the session tier.
@@ -368,6 +410,7 @@ async function manageSubscriptionFlow() {
     const tierRes = await fetchCurrentTier(idToken);
     if (tierRes.revoked) {
       // Access deliberately revoked — don't route to Portal/Checkout at all.
+      closeSpinner();
       await showAccessRevokedDialog({ message: tierRes.message });
       return;
     }
@@ -382,8 +425,10 @@ async function manageSubscriptionFlow() {
       // Subscriber → Customer Portal (manage payment method / cancel / invoices).
       try {
         const portalUrl = await startPortalSession(idToken);
+        closeSpinner();                    // dismiss before the browser takes over
         await shell.openExternal(portalUrl);
       } catch (e) {
+        closeSpinner();                    // dismiss before the error dialog
         log('[portal error]', e && e.message ? e.message : String(e));
         try {
           dialog.showErrorBox(
@@ -393,10 +438,12 @@ async function manageSubscriptionFlow() {
         } catch {}
       }
     } else {
-      // Free → Checkout to start paying. Reuses the shared checkout opener.
-      await openProCheckout(idToken);
+      // Free → Checkout to start paying. openProCheckout dismisses the spinner
+      // right before it opens the browser / shows its dialog.
+      await openProCheckout(idToken, closeSpinner);
     }
   } finally {
+    closeSpinner();   // safety net — covers any early return or throw
     manageInFlight = false;
   }
 }
@@ -443,9 +490,10 @@ const RELEASES_PAGE = process.env.RELEASES_PAGE ||
 
 // Open Stripe Checkout for Pro in the system browser, then tell the user to
 // finish there. Shared by the trial-ended and update-required dialogs.
-async function openProCheckout(idToken) {
+async function openProCheckout(idToken, beforeOpen) {
   try {
     const checkoutUrl = await startProCheckout(idToken);
+    if (beforeOpen) beforeOpen(); // e.g. dismiss the "Sending you to Stripe…" spinner
     await shell.openExternal(checkoutUrl);
     await dialog.showMessageBox({
       type: 'info',
@@ -455,6 +503,7 @@ async function openProCheckout(idToken) {
       detail: 'Once payment is approved, reopen iDEP — you will have Pro access.',
     });
   } catch (e) {
+    if (beforeOpen) beforeOpen(); // dismiss the spinner before the error dialog too
     log('[checkout error]', e && e.message ? e.message : String(e));
     try {
       dialog.showErrorBox(
