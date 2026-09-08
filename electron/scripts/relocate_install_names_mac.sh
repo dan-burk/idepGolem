@@ -97,6 +97,21 @@ while IFS= read -r macho; do
         install_name_tool -change "${dep}" "@loader_path/${up}/${suffix}" "${macho}"
         changed=1
         ;;
+      # Anything absolute whose leaf name we already ship in lib/. This is how
+      # the Fortran packages (DESeq2, edgeR, impute, preprocessCore) get fixed:
+      # they link /opt/gfortran/..., the toolchain setup-r installs to build
+      # them, which exists on no user's Mac. CRAN already ships libgfortran.5
+      # and libquadmath.0 in Resources/lib, so we just repoint at our copy.
+      # Scoped to lib/ deliberately - a leaf-name match anywhere would be a
+      # licence to silently swap unrelated libraries.
+      /usr/lib/*|/System/*|@*) ;;
+      /*)
+        leaf="${dep##*/}"
+        if [ -f "${dst}/lib/${leaf}" ]; then
+          install_name_tool -change "${dep}" "@loader_path/${up}/lib/${leaf}" "${macho}"
+          changed=1
+        fi
+        ;;
     esac
   done < <(otool -L "${macho}" 2>/dev/null | awk '/^[[:space:]]/ {print $1}')
 
