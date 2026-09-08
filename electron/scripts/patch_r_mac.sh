@@ -8,8 +8,13 @@ set -euo pipefail
 # no longer exists.  Rewrite the top-of-file variables in bin/R so they
 # are computed from the script's own location.
 #
-# bin/Rscript is a compiled binary but respects the R_HOME env var, which
-# main.js sets at spawn time — no patching needed there.
+# bin/Rscript is a separate compiled binary with its own baked-in path, so
+# main.js sets RHOME (no underscore) at spawn time instead. R_HOME alone
+# does nothing for it.
+#
+# Severing the framework's remaining ties to the host is a separate step:
+# see relocate_install_names_mac.sh, which must run AFTER the package
+# library is installed.
 #
 # Usage:  patch_r_mac.sh <R_HOME_DIR>
 #   e.g.  patch_r_mac.sh electron/runtime/R.framework/Resources

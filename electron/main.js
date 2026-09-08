@@ -95,12 +95,20 @@ function getRuntime() {
       return null;
     }
     const R_RES = path.dirname(path.dirname(rscript)); // .../R.framework/Resources
+    // The workflow stages pandoc into runtime/pandoc.mac and ships it via
+    // extraResources; without RSTUDIO_PANDOC, rmarkdown never finds it and
+    // every downloadable report fails.
+    const pandocDir = path.join(rp, 'runtime', 'pandoc.mac');
     return {
       rscript,
       env: {
         R_HOME: R_RES,
+        // Rscript reads RHOME, not R_HOME; without it it execs the
+        // compile-time /Library/Frameworks path and exits 255.
+        RHOME: R_RES,
         DYLD_FALLBACK_LIBRARY_PATH: path.join(R_RES, 'lib'),
-        PATH: [path.join(R_RES, 'bin'), process.env.PATH || ''].filter(Boolean).join(':'),
+        RSTUDIO_PANDOC: pandocDir,
+        PATH: [path.join(R_RES, 'bin'), pandocDir, process.env.PATH || ''].filter(Boolean).join(':'),
       },
     };
   }

@@ -1,84 +1,116 @@
-name: Build macOS (Electron + R.framework)
+# Unsigned macOS build, for validating the bundled R runtime on free public-repo
+# minutes. Everything the private build does EXCEPT code signing, notarization,
+# stapling and publishing.
+#
+# Dropping the signature costs nothing here: since the install names were
+# rewritten to @loader_path, library resolution no longer consults any DYLD_*
+# variable, which is the only thing hardened runtime affected. Signed and
+# unsigned resolve identically, so a green run here transfers.
+#
+# What it CANNOT tell you: whether signing, notarization or Gatekeeper work.
+# Those still need a run on the private repo before tagging a release.
+name: Test macOS runtime (unsigned)
 
 on:
   workflow_dispatch:
 
-  push:
-    tags:
-      - "desktop-v*"
-
 jobs:
   build:
-    runs-on: macos-latest
+    runs-on: macos-26
+    # 10x billing multiplier. Build is ~1h; cap well above that but far
+    # below GitHub's 6h default, which would cost 3600 billed minutes.
+    timeout-minutes: 150
     permissions:
-      contents: write
+      contents: read
     defaults:
       run:
         shell: bash
 
-    # Signing / notarization creds — kept as commented stubs for when an
-    # Apple Developer account is available.  Without them electron-builder
-    # does ad-hoc signing, which is enough for hardenedRuntime entitlements
-    # but triggers Gatekeeper warnings on first launch (users must
-    # right-click → Open, then drag the app into /Applications).
+    # No code signing here - see the header. electron-builder produces an
+    # unsigned .app, which is fine for everything this job tests.
     env:
-      # SKIP_NOTARIZE: "true"
-      # P12_BASE64: ${{ secrets.P12_BASE64 }}
-      # CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
-      # APPLE_ID: ${{ secrets.MAC_APPLE_ID }}
-      # APPLE_ID_PASSWORD: ${{ secrets.MAC_APPLE_ID_PASSWORD }}
-      # APPLE_TEAM_ID: ${{ secrets.MAC_APPLE_TEAM_ID }}
-      # APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.MAC_APP_SPECIFIC_PASSWORD }}
       CI: "true"
+      # Without this electron-builder searches the default keychain, finds
+      # nothing, and warns its way through the build.
+      CSC_IDENTITY_AUTO_DISCOVERY: "false"
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Detect package directory
-        id: detect-pkgdir
+
+      # The DMG step mounts a temporary volume and copies the entire .app into
+      # it, so it needs roughly TWICE the bundle size free. A bundled R runtime
+      # with 355 packages makes that several GB, and the arm64 runner does not
+      # have it spare: the build signs successfully and then dies with
+      # "No space left on device" while running dmgbuild.
+      #
+      # Keep the ACTIVE Xcode: codesign, notarytool and stapler all come from
+      # it. Only the unused versions and simulator runtimes are removed.
+      #
+      # The space check below is advisory only: warn now rather than leaving a
+      # later "No space left on device" to be diagnosed from a stack trace.
+      # With the two-phase build, peak usage is roughly 8.5 GB (staging is
+      # reclaimed before the DMG volume is mounted), so 10 GB is the point
+      # worth flagging. A bare `df -g` parse can yield a non-integer on
+      # unexpected output, so only compare when it actually looks like a
+      # number.
+      - name: Free disk space
+        run: |
+          set -uo pipefail
+          echo "--- before ---"
+          df -h /
+          sudo rm -rf ~/Library/Developer/CoreSimulator/Caches || true
+          sudo rm -rf /Library/Developer/CoreSimulator/Profiles/Runtimes || true
+          ACTIVE_XCODE="$(xcode-select -p | sed 's|/Contents/Developer.*||')"
+          echo "keeping active Xcode: $ACTIVE_XCODE"
+          for x in /Applications/Xcode_*.app; do
+            [ -e "$x" ] || continue
+            if [ "$x" != "$ACTIVE_XCODE" ]; then
+              echo "removing $x"
+              sudo rm -rf "$x" || true
+            fi
+          done
+          echo "--- after ---"
+          df -h /
+          AVAIL_GB=$(df -g / | awk 'NR==2 {print $4}')
+          echo "Available: ${AVAIL_GB}G"
+          case "$AVAIL_GB" in
+            ''|*[!0-9]*)
+              echo "::warning::Could not parse available space from df" ;;
+            *)
+              if [ "$AVAIL_GB" -lt 10 ]; then
+                echo "::warning::Only ${AVAIL_GB}G free. The DMG step needs roughly 2x the bundle size; consider pruning the R library further."
+              fi ;;
+          esac
+
+      - name: Set package directory
+        run: echo "PACKAGE_DIR=electron" >> "$GITHUB_ENV"
+
+      # The R package name encodes the release version and changes on every
+      # release: idepGolem -> idep250 -> idep251 -> idep300. R resolves
+      # system.file(package=) and packageVersion() against the INSTALLED name,
+      # so nothing on the desktop side may hardcode it. DESCRIPTION is the only
+      # source of truth; PKG_NAME is threaded through the build, the test,
+      # the bundle, and on to bootstrap.R at runtime via IDEP_APP_PKG.
+      - name: Detect R package source and name
         run: |
           set -euo pipefail
-
-          if [ -f "electron/package.json" ]; then
-            PACKAGE_DIR="electron"
-          elif [ -f "package.json" ]; then
-            PACKAGE_DIR="."
-          else
-            echo "package.json not found at repo root or electron/" >&2
+          if [ ! -f DESCRIPTION ]; then
+            echo "No DESCRIPTION at the repository root" >&2
             exit 1
           fi
-
-          echo "PACKAGE_DIR=$PACKAGE_DIR" >> "$GITHUB_ENV"
-          echo "PACKAGE_DIR = $PACKAGE_DIR"
-
-      - name: Detect R package source (idepGolem)
-        run: |
-          set -euo pipefail
-          desc_path=$(grep -rl "^Package:[[:space:]]*idepGolem\b" . || true)
-          if [ -z "$desc_path" ]; then
-            echo "idepGolem package source not found" >&2
-            exit 1
-          fi
-          PKG_SRC=$(dirname "$desc_path" | head -n 1)
-          echo "PKG_SRC=$PKG_SRC" >> "$GITHUB_ENV"
-          echo "PKG_SRC = $PKG_SRC"
-
-      - name: Detect package name from DESCRIPTION
-        run: |
-          set -euo pipefail
-          desc="$PKG_SRC/DESCRIPTION"
-          if [ ! -f "$desc" ]; then
-            echo "DESCRIPTION not found at: $desc" >&2
-            exit 1
-          fi
-          PKG_NAME=$(grep "^Package:" "$desc" | head -n1 | awk '{print $2}')
+          PKG_SRC="."
+          PKG_NAME=$(awk '/^Package:/ {print $2; exit}' DESCRIPTION)
           if [ -z "$PKG_NAME" ]; then
-            echo "Could not parse Package field in: $desc" >&2
+            echo "Could not parse the Package field in ./DESCRIPTION" >&2
             exit 1
           fi
+          echo "PKG_SRC=$PKG_SRC" >> "$GITHUB_ENV"
           echo "PKG_NAME=$PKG_NAME" >> "$GITHUB_ENV"
+          echo "PKG_SRC  = $PKG_SRC"
           echo "PKG_NAME = $PKG_NAME"
+          grep -E "^(Package|Version):" DESCRIPTION
 
       - name: Fix invalid filename in R/ (leading underscore)
         run: |
@@ -113,37 +145,12 @@ jobs:
             npm install -D electron-builder@26.8.2
           fi
 
-      # electron/package.json's "version" is the single source of truth for
-      # the release version. Release tags (desktop-v*) must match it — running
-      # `npm version` in electron/ keeps the bump, commit, and tag in sync
-      # automatically. This guard fails fast (~10s) if a mismatched tag is
-      # pushed, instead of building and publishing a misnamed installer.
-      - name: Verify tag matches package.json version
-        if: startsWith(github.ref, 'refs/tags/desktop-v')
-        working-directory: ${{ env.PACKAGE_DIR }}
-        run: |
-          set -euo pipefail
-          TAG_VER="${GITHUB_REF_NAME#desktop-v}"
-          PKG_VER="$(node -p "require('./package.json').version")"
-          echo "tag version  = $TAG_VER"
-          echo "package.json = $PKG_VER"
-          if [ "$TAG_VER" != "$PKG_VER" ]; then
-            echo "::error::Tag '$GITHUB_REF_NAME' does not match electron/package.json version '$PKG_VER'. Run 'npm version' in electron/ to keep them in sync."
-            exit 1
-          fi
-          echo "Version check OK — building desktop-v$PKG_VER"
 
-      # Write OAuth config from GitHub Actions secrets so it ships in the installer.
-      - name: Write electron/.env from secrets
+      # Stub: this job never launches Electron, only the bundled Rscript, and a
+      # public repo has no business reading OAuth secrets.
+      - name: Stub electron/.env
         working-directory: ${{ env.PACKAGE_DIR }}
-        run: |
-          cat > .env <<EOF
-          GOOGLE_OAUTH_CLIENT_ID=${{ secrets.GOOGLE_OAUTH_CLIENT_ID }}
-          GOOGLE_OAUTH_CLIENT_SECRET=${{ secrets.GOOGLE_OAUTH_CLIENT_SECRET }}
-          ENTITLEMENT_URL=${{ secrets.ENTITLEMENT_URL }}
-          CHECKOUT_URL=${{ secrets.CHECKOUT_URL }}
-          PORTAL_URL=${{ secrets.PORTAL_URL }}
-          EOF
+        run: ': > .env'
 
       - name: Setup R
         uses: r-lib/actions/setup-r@v2
@@ -224,10 +231,49 @@ jobs:
           fi
           mkdir -p "$lib"
 
+      # rmarkdown shells out to the pandoc binary; it's not an R package, so
+      # install_packages.R can't fetch it. Ship the official portable build.
+      # See main.js getRuntime() for the matching PATH/RSTUDIO_PANDOC wiring.
+      # macos-latest runners are arm64; match get_r_mac.sh's arch mapping.
+      - name: Stage pandoc
+        env:
+          PANDOC_VERSION: "3.11"
+        run: |
+          set -euo pipefail
+          case "$(uname -m)" in
+            x86_64|amd64) ARCH="x86_64" ;;
+            *)            ARCH="arm64" ;;
+          esac
+          dest="$PACKAGE_DIR/runtime/pandoc.mac"
+          tmp="$(mktemp -d)"
+          curl -fL --retry 3 -o "$tmp/pandoc.zip" \
+            "https://github.com/jgm/pandoc/releases/download/${PANDOC_VERSION}/pandoc-${PANDOC_VERSION}-${ARCH}-macOS.zip"
+          ditto -x -k "$tmp/pandoc.zip" "$tmp/extracted"
+          mkdir -p "$dest"
+          cp "$tmp/extracted/pandoc-${PANDOC_VERSION}-${ARCH}/bin/pandoc" "$dest/pandoc"
+          chmod +x "$dest/pandoc"
+          echo "pandoc ${PANDOC_VERSION} ready at: $dest/pandoc"
+
+      # Restores the ~355 installed R packages so they are not recompiled on
+      # every run. The restore-keys fallback keys on install_packages.R alone,
+      # so bumping DESCRIPTION's Version: still reuses the previous library and
+      # pak installs only what genuinely changed. Changing install_packages.R
+      # (a PPM snapshot bump) deliberately misses everything and reinstalls
+      # clean -- matching a fallback there would ship the old pinned versions.
+      - name: Cache bundled R library
+        id: r-lib-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ env.PACKAGE_DIR }}/runtime/R.framework/Resources/library
+          key: rlib-macos-arm64-R4.5.1-${{ env.ImageOS }}-${{ runner.arch }}-${{ hashFiles('electron/scripts/install_packages.R') }}-${{ hashFiles('DESCRIPTION') }}
+          restore-keys: |
+            rlib-macos-arm64-R4.5.1-${{ env.ImageOS }}-${{ runner.arch }}-${{ hashFiles('electron/scripts/install_packages.R') }}-
+
       # Shared across all three platforms.  Reads Imports + Remotes from
       # DESCRIPTION, installs via PPM-pinned CRAN + Bioc snapshots using
       # pak::local_install_deps().  Do not duplicate logic here.
       - name: Install R packages via PPM snapshot
+        if: steps.r-lib-cache.outputs.cache-hit != 'true'
         env:
           GITHUB_PAT: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -236,7 +282,19 @@ jobs:
           lib="$PACKAGE_DIR/runtime/R.framework/Resources/library"
           "$rscript" --no-save --no-restore electron/scripts/install_packages.R "$lib"
 
-      - name: Build and install idepGolem into R.framework/Resources/library
+      # Saved BEFORE the app package is installed, so the cache holds exactly the
+      # ~355 dependencies and never a stale idep<version>/ from an earlier
+      # release -- both installs write into the same library/ dir. Explicit save
+      # rather than the post-job one, which on macOS would find nothing: the
+      # "Reclaim staging space" step deletes runtime/ before the job ends.
+      - name: Save bundled R library cache
+        if: steps.r-lib-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ env.PACKAGE_DIR }}/runtime/R.framework/Resources/library
+          key: ${{ steps.r-lib-cache.outputs.cache-primary-key }}
+
+      - name: Build and install the R package into R.framework/Resources/library
         env:
           _R_CHECK_FORCE_SUGGESTS_: "false"
           R_BUILD_DONTFAIL_ON_WARNING_: "true"
@@ -327,41 +385,80 @@ jobs:
               find "$R_LIB" -name "runibic.so" -exec otool -L {} \; 2>/dev/null || true
           fi
 
-      # Pre-flight smoke test: exercise the bundled runtime the same way
+      # CRAN bakes /Library/Frameworks paths into every Mach-O, and dyld tries
+      # those BEFORE any fallback, so without this the app loads the host's
+      # libR whenever a user has R installed. Runs here because it must come
+      # after the package library exists - CRAN's package binaries carry the
+      # same absolute reference. See documentation/notes/rscript-rhome-relocation.md
+      - name: Sever host-framework references
+        run: |
+          set -euo pipefail
+          bash electron/scripts/relocate_install_names_mac.sh \
+            "$PACKAGE_DIR/runtime/R.framework/Resources"
+
+          # Same sweep the packaged app gets, run here so a dangling host
+          # dependency fails with the staging tree still on disk - "Reclaim
+          # staging space" rm -rf's it before the authoritative run. Nothing
+          # between the two points can introduce a dependency: prune deletes
+          # docs, strip -x drops local symbols, neither touches LC_LOAD_DYLIB.
+          bash electron/scripts/verify_no_host_deps_mac.sh "$PACKAGE_DIR/runtime"
+
+      # Pre-flight test: exercise the bundled runtime the same way
       # bootstrap.R will at app launch, but without starting the shiny
       # server.  Catches install-time failures (missing deps, namespace
       # load errors, broken run_app()) in CI instead of on the user's Mac.
-      - name: Smoke-test bundled R runtime
+      - name: Test bundled R runtime
         run: |
           set -euo pipefail
-          rscript="$PACKAGE_DIR/runtime/R.framework/Resources/bin/Rscript"
-          lib="$PACKAGE_DIR/runtime/R.framework/Resources/library"
+          R_RES="$(cd "$PACKAGE_DIR/runtime/R.framework/Resources" && pwd -P)"
+          rscript="$R_RES/bin/Rscript"
+          lib="$R_RES/library"
 
-          cat > smoke_test.R << 'EOF'
+          # Mirror main.js getRuntime(); without RHOME this runs the runner's
+          # own R and passes while the shipped app is broken.
+          export RHOME="$R_RES"
+          export R_HOME="$R_RES"
+          export DYLD_FALLBACK_LIBRARY_PATH="$R_RES/lib"
+          export R_LIBS_USER="$lib"
+          export R_LIBS=""
+
+          cat > runtime_test.R << 'EOF'
           args <- commandArgs(trailingOnly = TRUE)
           lib <- args[1]
+          app_pkg <- args[2]
           .libPaths(c(lib, .libPaths()))
-          cat("[smoke] .libPaths() =", paste(.libPaths(), collapse = " | "), "\n")
+          cat("[test] .libPaths() =", paste(.libPaths(), collapse = " | "), "\n")
 
-          required <- c("idepGolem", "shiny",
+          # Fail if we ended up in the runner's R rather than the bundled one.
+          expected <- normalizePath(dirname(lib), mustWork = TRUE)
+          actual   <- normalizePath(R.home(),     mustWork = TRUE)
+          cat("[test] R.home() =", actual, "\n")
+          if (!identical(actual, expected)) {
+            stop("[test] FAIL: ran the wrong R. expected ", expected, " got ", actual)
+          }
+          cat("[test] OK: running the bundled R\n")
+          cat("[test] app package =", app_pkg, "\n")
+
+          required <- c(app_pkg, "shiny",
                         "DESeq2", "ComplexHeatmap", "WGCNA",
                         "QUBIC", "runibic")
           for (pkg in required) {
             if (!requireNamespace(pkg, quietly = TRUE)) {
-              stop("[smoke] FAIL: package '", pkg, "' not loadable")
+              stop("[test] FAIL: package '", pkg, "' not loadable")
             }
-            cat("[smoke] OK: requireNamespace(", pkg, ")\n", sep = "")
+            cat("[test] OK: requireNamespace(", pkg, ")\n", sep = "")
           }
 
-          app <- idepGolem::run_app()
+          run_app <- getExportedValue(app_pkg, "run_app")
+          app <- run_app()
           if (!inherits(app, "shiny.appobj")) {
-            stop("[smoke] FAIL: idepGolem::run_app() did not return a shiny.appobj")
+            stop("[test] FAIL: ", app_pkg, "::run_app() did not return a shiny.appobj")
           }
-          cat("[smoke] OK: idepGolem::run_app() returned shiny.appobj\n")
-          cat("[smoke] PASS: bundled R runtime is healthy\n")
+          cat("[test] OK: ", app_pkg, "::run_app() returned shiny.appobj\n", sep = "")
+          cat("[test] PASS: bundled R runtime is healthy\n")
           EOF
 
-          "$rscript" --vanilla smoke_test.R "$lib"
+          "$rscript" --vanilla runtime_test.R "$lib" "$PKG_NAME"
 
       - name: Show current file descriptor limits
         run: |
@@ -375,7 +472,7 @@ jobs:
           set -euxo pipefail
           sudo sysctl -w kern.maxfiles=65536
           sudo sysctl -w kern.maxfilesperproc=65536
-          ulimit -n 65536 || ulimit -n 16384 || ulimit -n 8192
+          ulimit -n 65536
 
       - name: Prune R library (docs, examples, tests)
         run: |
@@ -391,39 +488,94 @@ jobs:
 
           find "$R_LIB" \( -name "*.so" -o -name "*.dylib" \) -exec strip -x {} \; || true
 
-      - name: Build (npm run dist)
+      # Built in two phases to halve peak disk. A single `electron-builder`
+      # invocation holds three copies of the ~3.5 GB R runtime at once: the
+      # staged runtime/, the packaged copy inside iDEP.app, and the temporary
+      # volume that dmgbuild mounts and dittos into. That peaks near 12 GB on a
+      # runner with about 14 GB free, which is what produced
+      # "No space left on device" during dmgbuild.
+      #
+      # Phase 1 packages and signs the .app. The staged runtime/ and app/ are
+      # then redundant - their contents live inside the .app - so removing them
+      # frees roughly 3.5 GB before phase 2 mounts the DMG volume.
+      - name: Build phase 1 (package the .app)
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         working-directory: ${{ env.PACKAGE_DIR }}
         run: |
           set -euxo pipefail
-          ulimit -n 65536 || ulimit -n 16384 || ulimit -n 8192
-          npm run dist
+          ulimit -n 65536
+          df -h /
+          npx electron-builder --mac --dir --publish=never
+          df -h /
 
-      # - name: Notarize DMG (only on tags v*)
-      #   working-directory: ${{ env.PACKAGE_DIR }}
-      #   run: |
-      #     set -euxo pipefail
-      #     DMG_PATH=$(ls dist/*.dmg | head -n1)
-      #     xcrun notarytool submit "$DMG_PATH" \
-      #       --apple-id "$APPLE_ID" \
-      #       --team-id "$APPLE_TEAM_ID" \
-      #       --password "$APPLE_APP_SPECIFIC_PASSWORD" \
-      #       --wait
-      #     xcrun stapler staple "$DMG_PATH"
-      #     xcrun stapler validate "$DMG_PATH"
+      - name: Reclaim staging space before building the DMG
+        working-directory: ${{ env.PACKAGE_DIR }}
+        run: |
+          set -uo pipefail
+          echo "--- staging sizes ---"
+          du -sh runtime app 2>/dev/null || true
+          APP_PATH="$(ls -d dist/mac*/*.app | head -n1)"
+          if [ ! -d "$APP_PATH" ]; then
+            echo "::error::No packaged .app found; refusing to delete staging."
+            exit 1
+          fi
+          # Only safe because the packaged .app already contains this content.
+          rm -rf runtime app
+          echo "--- after reclaim ---"
+          df -h /
+          echo "APP_PATH=$APP_PATH" >> "$GITHUB_ENV"
 
+      # dmg.size must be set explicitly. electron-builder delegates to Python
+      # dmgbuild, which creates a FIXED-SIZE HFS+ image before copying anything
+      # and sizes it as 128 MiB + the sum of file sizes rounded up to 4 KiB.
+      # That sum counts files only: directory catalog records, the catalog and
+      # attribute B-trees, and the allocation bitmap all cost real bytes and are
+      # not modelled. An R library with 355 packages has enough entries for that
+      # shortfall to exceed the margin, which is why upstream documents this
+      # option as the remedy for "No space left on device" specifically.
+      #
+      # Oversizing is free in the shipped artifact: shrinkOnWrite defaults to
+      # true, so the filesystem is shrunk to its minimum before compression. It
+      # costs only transient host space, which the reclaim step above just
+      # freed. Size takes hdiutil syntax, hence the "m" suffix.
+      - name: Build phase 2 (DMG from the prepackaged app)
+        working-directory: ${{ env.PACKAGE_DIR }}
+        run: |
+          set -euxo pipefail
+          ulimit -n 65536
+          APP_MB=$(du -sm "$APP_PATH" | cut -f1)
+          DMG_MB=$(( APP_MB * 5 / 4 + 512 ))
+          echo "app=${APP_MB}M requesting dmg image=${DMG_MB}M"
+          df -h /
+          npx electron-builder --mac dmg --prepackaged "$APP_PATH" \
+            -c.dmg.size="${DMG_MB}m" --publish=never
+          df -h /
+          ls -lh dist/*.dmg
+
+      # The only check downstream of the prune and strip steps, and the only one
+      # that sees the packaged library.
+      - name: Host dependency sweep (packaged app)
+        run: |
+          set -euo pipefail
+          APP=$(ls -d "$PACKAGE_DIR"/dist/mac*/*.app | head -n1)
+          echo "Sweeping $APP"
+          bash "$GITHUB_WORKSPACE/electron/scripts/verify_no_host_deps_mac.sh" \
+            "$APP/Contents/Resources/runtime"
+
+
+      # Runs even if notarization timed out, so an hour of build work is never
+      # lost to a slow Apple queue. A timed-out submission is still processing
+      # server side: retrieve the verdict with the "Notarization status"
+      # workflow, then staple this artifact rather than rebuilding.
+      # *.dmg only: dist/** also stored the unpacked .app (~3.5 GB of R runtime).
+      # continue-on-error: a full storage quota must not discard a finished build.
       - name: Upload dist artifacts
+        if: always()
+        continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
           name: mac-dist
-          path: ${{ env.PACKAGE_DIR }}/dist/**
-          if-no-files-found: error
-          retention-days: 14
-
-      - name: Publish to GitHub Release
-        if: startsWith(github.ref, 'refs/tags/desktop-v')
-        uses: softprops/action-gh-release@v2
-        with:
-          files: ${{ env.PACKAGE_DIR }}/dist/*.dmg
-          fail_on_unmatched_files: true
+          path: ${{ env.PACKAGE_DIR }}/dist/*.dmg
+          if-no-files-found: warn
+          retention-days: 3

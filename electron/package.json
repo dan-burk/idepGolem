@@ -88,15 +88,7 @@
       "hardenedRuntime": true,
       "gatekeeperAssess": false,
       "entitlements": "entitlements.mac.plist",
-      "notarize": false,
-      "signIgnore": [
-        ".*R\\.framework/Resources/library/.*/help(/.*)?",
-        ".*R\\.framework/Resources/library/.*/doc(/.*)?",
-        ".*R\\.framework/Resources/library/.*/html(/.*)?",
-        ".*R\\.framework/Resources/library/.*/examples(/.*)?",
-        ".*R\\.framework/Resources/library/.*/R(/.*)?",
-        ".*R\\.framework/Resources/library/.*/data(/.*)?"
-      ]
+      "notarize": false
     },
     "linux": {
       "target": [
