@@ -18,8 +18,12 @@ set -euo pipefail
 # link libR.dylib by absolute path too, so a pass over base R alone leaves every
 # package .so still pointing at the host.
 #
-# install_name_tool invalidates code signatures. Each modified file is re-signed
-# ad-hoc here so the staged tree runs; electron-builder re-signs afterwards.
+# install_name_tool invalidates the signature it found, and on Apple Silicon an
+# invalidly-signed Mach-O will not load. It re-signs ad-hoc itself, which is why
+# the long-standing libomp step has never needed help - the preflight dlopens
+# the .so files it patches (QUBIC, runibic) on every build. We rely on that here
+# too. If it ever proves untrue the preflight dies loudly at 'Test bundled R
+# runtime', which runs this staged tree before electron-builder signs anything.
 #
 # Usage:  relocate_install_names_mac.sh <R_HOME_DIR>
 
@@ -115,16 +119,7 @@ while IFS= read -r macho; do
     esac
   done < <(otool -L "${macho}" 2>/dev/null | awk '/^[[:space:]]/ {print $1}')
 
-  if [ "${changed}" -eq 1 ]; then
-    rewritten=$((rewritten + 1))
-    # install_name_tool invalidates the signature it found. Re-sign ad-hoc so
-    # the tree is runnable before electron-builder gets to it: on Apple Silicon
-    # an invalidly-signed MAIN EXECUTABLE is killed, and bin/exec/R is one. The
-    # preflight test runs the staged tree, so without this it can die there.
-    # A real identity replaces this later where one is configured.
-    codesign --force --sign - "${macho}" 2>/dev/null \
-      || echo "WARNING: could not ad-hoc sign ${macho#"${dst}"/}" >&2
-  fi
+  [ "${changed}" -eq 1 ] && rewritten=$((rewritten + 1))
 done < <(find_machos)
 
 echo "Rewrote install names in ${rewritten} Mach-O file(s)"
