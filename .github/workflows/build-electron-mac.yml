@@ -1,15 +1,10 @@
-# Unsigned macOS build, for validating the bundled R runtime on free public-repo
-# minutes. Everything the private build does EXCEPT code signing, notarization,
-# stapling and publishing.
+# Full signed + notarized macOS build on free public-repo minutes. Mirrors the
+# private build except that it does not publish a GitHub Release.
 #
-# Dropping the signature costs nothing here: since the install names were
-# rewritten to @loader_path, library resolution no longer consults any DYLD_*
-# variable, which is the only thing hardened runtime affected. Signed and
-# unsigned resolve identically, so a green run here transfers.
-#
-# What it CANNOT tell you: whether signing, notarization or Gatekeeper work.
-# Those still need a run on the private repo before tagging a release.
-name: Test macOS runtime (unsigned)
+# The notarize step's `if: startsWith(github.ref, 'refs/tags/desktop-v')` gate
+# is removed on purpose: this workflow is dispatch-only, so the gate would be
+# false every run and the step would silently skip.
+name: Build macOS (signed + notarized)
 
 on:
   workflow_dispatch:
@@ -26,18 +21,72 @@ jobs:
       run:
         shell: bash
 
-    # No code signing here - see the header. electron-builder produces an
-    # unsigned .app, which is fine for everything this job tests.
+    # Code signing. electron-builder reads CSC_LINK (base64 .p12) and
+    # CSC_KEY_PASSWORD automatically — no build config needed. It signs every
+    # nested Mach-O inside out, which is required: Apple rejects notarization
+    # if any binary in the bundle is unsigned, and R ships hundreds of .so
+    # files. Do NOT add `signIgnore` patterns without verifying them against a
+    # real Mach-O inventory — electron-builder matches them with an unanchored
+    # RegExp.test(), so a pattern like ".../R(/.*)?" also matches Rcpp.so.
+    #
+    # Notarization is NOT done by electron-builder (package.json keeps
+    # "notarize": false). We submit the finished DMG to notarytool below —
+    # a single-file upload, which avoids a known @electron/notarize hang when
+    # waiting on .app submissions.
+    #
+    # CSC_LINK is deliberately absent: when electron-builder sees it, it
+    # provisions its own keychain, which fails on the macos-26 image. We import
+    # the cert below and point it at the result via CSC_KEYCHAIN / CSC_NAME.
     env:
       CI: "true"
-      # Without this electron-builder searches the default keychain, finds
-      # nothing, and warns its way through the build.
-      CSC_IDENTITY_AUTO_DISCOVERY: "false"
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
+      # Lifted from smoke-test-mac-signing.yml, which passes on this image.
+      - name: Import Developer ID certificate
+        env:
+          CSC_LINK: ${{ secrets.CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+        # `set -euo pipefail` without -x: tracing would leak the cert password.
+        run: |
+          set -euo pipefail
+          if [ -z "${CSC_LINK:-}" ]; then echo "::error::CSC_LINK is not set"; exit 1; fi
+
+          KEYCHAIN="$RUNNER_TEMP/build.keychain-db"
+          KEYCHAIN_PW=$(uuidgen)
+          echo "KEYCHAIN=$KEYCHAIN" >> "$GITHUB_ENV"
+
+          security create-keychain -p "$KEYCHAIN_PW" "$KEYCHAIN"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN"
+          security unlock-keychain -p "$KEYCHAIN_PW" "$KEYCHAIN"
+
+          umask 077
+          echo "$CSC_LINK" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security import "$RUNNER_TEMP/cert.p12" -k "$KEYCHAIN" \
+            -P "$CSC_KEY_PASSWORD" -T /usr/bin/codesign -T /usr/bin/security
+          rm -f "$RUNNER_TEMP/cert.p12"
+
+          # Without this, codesign prompts for keychain access and hangs in CI.
+          security set-key-partition-list -S apple-tool:,apple:,codesign: \
+            -s -k "$KEYCHAIN_PW" "$KEYCHAIN" >/dev/null
+          security list-keychains -d user -s "$KEYCHAIN" $(security list-keychains -d user | tr -d '"')
+
+          echo "--- available signing identities ---"
+          security find-identity -v -p codesigning "$KEYCHAIN"
+          IDENTITY=$(security find-identity -v -p codesigning "$KEYCHAIN" \
+            | grep "Developer ID Application" | head -1 | awk -F'"' '{print $2}')
+          if [ -z "$IDENTITY" ]; then
+            echo "::error::No 'Developer ID Application' identity found."
+            exit 1
+          fi
+
+          # CSC_NAME must NOT carry the "Developer ID Application:" prefix -
+          # electron-builder picks the certificate type itself and rejects it.
+          echo "CSC_KEYCHAIN=$KEYCHAIN" >> "$GITHUB_ENV"
+          echo "CSC_NAME=${IDENTITY#Developer ID Application: }" >> "$GITHUB_ENV"
+          echo "Using identity: $IDENTITY"
 
       # The DMG step mounts a temporary volume and copies the entire .app into
       # it, so it needs roughly TWICE the bundle size free. A bundled R runtime
@@ -146,11 +195,17 @@ jobs:
           fi
 
 
-      # Stub: this job never launches Electron, only the bundled Rscript, and a
-      # public repo has no business reading OAuth secrets.
-      - name: Stub electron/.env
+      # Write OAuth config from GitHub Actions secrets so it ships in the installer.
+      - name: Write electron/.env from secrets
         working-directory: ${{ env.PACKAGE_DIR }}
-        run: ': > .env'
+        run: |
+          cat > .env <<EOF
+          GOOGLE_OAUTH_CLIENT_ID=${{ secrets.GOOGLE_OAUTH_CLIENT_ID }}
+          GOOGLE_OAUTH_CLIENT_SECRET=${{ secrets.GOOGLE_OAUTH_CLIENT_SECRET }}
+          ENTITLEMENT_URL=${{ secrets.ENTITLEMENT_URL }}
+          CHECKOUT_URL=${{ secrets.CHECKOUT_URL }}
+          PORTAL_URL=${{ secrets.PORTAL_URL }}
+          EOF
 
       - name: Setup R
         uses: r-lib/actions/setup-r@v2
@@ -498,7 +553,7 @@ jobs:
       # Phase 1 packages and signs the .app. The staged runtime/ and app/ are
       # then redundant - their contents live inside the .app - so removing them
       # frees roughly 3.5 GB before phase 2 mounts the DMG volume.
-      - name: Build phase 1 (package the .app)
+      - name: Build phase 1 (package and sign the .app)
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         working-directory: ${{ env.PACKAGE_DIR }}
@@ -553,16 +608,152 @@ jobs:
           df -h /
           ls -lh dist/*.dmg
 
-      # The only check downstream of the prune and strip steps, and the only one
-      # that sees the packaged library.
-      - name: Host dependency sweep (packaged app)
+      # Verify the signature locally BEFORE notarizing. Notarization is a slow
+      # round trip, so catching an unsigned nested binary here saves a long
+      # wait. Note this is not sufficient on its own — a bundle can pass local
+      # verification and still be rejected by the notary service, so we still
+      # read the notarytool log below.
+      - name: Verify code signature
         run: |
           set -euo pipefail
           APP=$(ls -d "$PACKAGE_DIR"/dist/mac*/*.app | head -n1)
-          echo "Sweeping $APP"
+          echo "Verifying $APP"
+          codesign --verify --deep --strict --verbose=2 "$APP"
+          codesign --display --verbose=4 "$APP" 2>&1 | grep -E "Authority|TeamIdentifier|Signature" || true
+          # Spot-check nested R binaries — these are the ones an over-broad
+          # signIgnore would silently leave unsigned.
+          #
+          # Do NOT write this as `find ... | head -20 | while read`. Under
+          # `set -o pipefail`, head exits after 20 lines, find takes SIGPIPE on
+          # its next write and returns 141, and the pipeline fails the step even
+          # when every binary is correctly signed. Reading from a process
+          # substitution instead keeps find's exit status out of the pipeline
+          # and keeps the loop in this shell, so the counters survive it.
+          echo "--- sampling nested R .so files ---"
+          checked=0
+          unsigned=0
+          while IFS= read -r f; do
+            if codesign --verify --strict "$f" 2>/dev/null; then
+              echo "  signed:   ${f##*/library/}"
+            else
+              echo "  UNSIGNED: ${f##*/library/}"
+              unsigned=$((unsigned + 1))
+            fi
+            checked=$((checked + 1))
+            [ "$checked" -lt 20 ] || break
+          done < <(find "$APP" -name "*.so" -type f)
+          if [ "$unsigned" -gt 0 ]; then
+            echo "::error::${unsigned} of ${checked} sampled .so files are unsigned."
+            exit 1
+          fi
+          echo "Checked ${checked} nested .so files; all signed."
+
+          # The only check downstream of the prune and strip steps, and the
+          # only one that sees the packaged 355-package library.
+          echo "--- host dependency sweep ---"
           bash "$GITHUB_WORKSPACE/electron/scripts/verify_no_host_deps_mac.sh" \
             "$APP/Contents/Resources/runtime"
 
+          # bin/exec/R must carry allow-dyld-environment-variables or it starts
+          # with DYLD_FALLBACK_LIBRARY_PATH stripped and cannot find libR.dylib
+          # on a Mac with no system R.
+          #
+          # This asserts the entitlement is PRESENT. It cannot prove it works:
+          # this runner has R at the baked-in path, so libR always resolves
+          # here no matter what. The end-to-end proof lives in the
+          # smoke-test-mac-runtime workflow, which hides the system R and runs
+          # the signed bundle in ~10 minutes. Run that before tagging.
+          # See documentation/notes/rscript-rhome-relocation.md
+          echo "--- entitlements on bin/exec/R ---"
+          EXEC_R="$APP/Contents/Resources/runtime/R.framework/Resources/bin/exec/R"
+          if [ ! -f "$EXEC_R" ]; then
+            echo "::error::bin/exec/R not found at $EXEC_R"
+            exit 1
+          fi
+          ents="$(codesign -d --entitlements - --xml "$EXEC_R" 2>&1 || true)"
+          echo "$ents"
+          if printf '%s' "$ents" | grep -q "allow-dyld-environment-variables"; then
+            echo "OK: bin/exec/R carries allow-dyld-environment-variables."
+          else
+            echo "::error::bin/exec/R is MISSING allow-dyld-environment-variables."
+            echo "::error::It will launch with DYLD_* stripped and fail to load libR.dylib"
+            echo "::error::on any Mac without a system R install."
+            exit 1
+          fi
+
+      - name: Notarize and staple DMG
+        working-directory: ${{ env.PACKAGE_DIR }}
+        env:
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+        # NOTE: deliberately `set -euo pipefail`, never `-x`. Tracing would
+        # print the App Store Connect private key into the build log.
+        run: |
+          set -euo pipefail
+          DMG_PATH=$(ls dist/*.dmg | head -n1)
+          echo "Notarizing $DMG_PATH ($(du -h "$DMG_PATH" | cut -f1))"
+
+          KEY_FILE="$RUNNER_TEMP/AuthKey.p8"
+          umask 077
+          printf '%s' "$APPLE_API_KEY" > "$KEY_FILE"
+          cleanup() { rm -f "$KEY_FILE"; }
+          trap cleanup EXIT
+
+          # --timeout bounds the wait. GitHub caps a job at 6h and the R build
+          # already spends ~1h, so we cannot block indefinitely. Hitting the
+          # timeout is NOT a rejection: the submission keeps processing on
+          # Apple's side and can be resumed with
+          #   xcrun notarytool wait <submission-id> --key ... --key-id ... --issuer ...
+          set +e
+          xcrun notarytool submit "$DMG_PATH" \
+            --key "$KEY_FILE" \
+            --key-id "$APPLE_API_KEY_ID" \
+            --issuer "$APPLE_API_ISSUER" \
+            --wait --timeout 45m 2>&1 | tee notarize.log
+          SUBMIT_RC=${PIPESTATUS[0]}
+          set -e
+
+          SUBMISSION_ID=$(grep -oE '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}' notarize.log | head -1 || true)
+          echo "Submission ID: ${SUBMISSION_ID:-<none captured>}"
+
+          # Two very different failures. A timeout means Apple is still working
+          # and the DMG is fine; the build artifact is uploaded regardless, so
+          # recovery is to fetch the verdict and staple that artifact, NOT to
+          # rebuild. A rejection means Apple examined the bundle and refused it,
+          # and only then is the detailed log meaningful.
+          # Match on notarytool's explicit timeout message, or on the ABSENCE of
+          # the final indented verdict line. Do NOT test for the bare substring
+          # "status:" - while waiting, notarytool prints unindented progress
+          # lines reading "Current status: In Progress", which contain it, so
+          # such a test never discriminates.
+          if grep -q "Timeout of" notarize.log || ! grep -qE '^[[:space:]]+status:' notarize.log; then
+            echo "::warning::Notarization wait timed out. This is NOT a rejection."
+            echo "::warning::Submission ID: $SUBMISSION_ID"
+            echo "::warning::Apple is still processing. Do NOT rebuild."
+            echo "::warning::1. Run the 'Notarization status' workflow with this ID (action: info)."
+            echo "::warning::2. If Accepted, download the mac-dist artifact from this run and staple it."
+            exit 1
+          fi
+
+          if [ "$SUBMIT_RC" -ne 0 ] || ! grep -q "status: Accepted" notarize.log; then
+            echo "::error::Notarization was REJECTED. Fetching the detailed log."
+            echo "::error::Submission ID: $SUBMISSION_ID"
+            if [ -n "$SUBMISSION_ID" ]; then
+              # This is the ONLY output that names the offending binaries.
+              xcrun notarytool log "$SUBMISSION_ID" \
+                --key "$KEY_FILE" --key-id "$APPLE_API_KEY_ID" --issuer "$APPLE_API_ISSUER" || true
+            fi
+            exit 1
+          fi
+
+          # Stapling attaches the notarization ticket so Gatekeeper works offline.
+          xcrun stapler staple "$DMG_PATH"
+          xcrun stapler validate "$DMG_PATH"
+
+          # Final check: what a user's Mac will actually decide on first launch.
+          spctl --assess --type open --context context:primary-signature -vv "$DMG_PATH" || true
+          echo "Notarized and stapled."
 
       # Runs even if notarization timed out, so an hour of build work is never
       # lost to a slow Apple queue. A timed-out submission is still processing
@@ -579,3 +770,8 @@ jobs:
           path: ${{ env.PACKAGE_DIR }}/dist/*.dmg
           if-no-files-found: warn
           retention-days: 3
+
+
+      - name: Clean up keychain
+        if: always()
+        run: security delete-keychain "$KEYCHAIN" || true
